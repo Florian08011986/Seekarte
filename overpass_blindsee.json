@@ -1,0 +1,10 @@
+[out:json][timeout:25];
+(
+  way["natural"="water"]["name"="Blindsee"](47.35,10.83,47.37,10.86);
+  node(around:1000)["amenity"];
+  node(around:1000)["tourism"];
+  node(around:1000)["leisure"];
+  node(around:1000)["highway"="parking"];
+  way(around:1000)["highway"~"path|track|footway"];
+);
+out body center;
