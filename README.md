@@ -1,40 +1,99 @@
-# 🏔️ Blindsee 3D Reality Map
+# 🏔️ Blindsee · Tourenkarte
 
-Eine interaktive, mobile-optimierte 3D-Reliefkarte und ein digitaler Bergführer für den **Blindsee** in Tirol (Österreich) – entwickelt mit MapLibre GL JS, Geländerelief-Terrain und hochauflösenden Satellitendaten.
+Interaktive 3D-Karte mit **echten, berechneten Rundwegen** rund um den Blindsee in Tirol.
 
 ![Blindsee 3D](blindsee_screenshot.png)
 
-## ✨ Features
+## Was die Karte kann
 
-- **Echtes 3D-Geländerelief:** Authentische alpine Topografie der Grubigstein- und Zugspitz-Region mit dynamischer Höhenüberhöhung und Sonnenstand-Beleuchtung.
-- **Interaktiver Tour-Assistent:** 4-stufiger Tourenberater abgestimmt auf Zielgruppe (Kinderwagen, Familie, Wanderer, mit Hund), gewünschte Streckenlänge und Interessenschwerpunkte.
-- **4 kuratierte Routen:**
-  1. *Uferspaziergang Bootshaus* (1.8 km · kinderwagentauglich)
-  2. *Familien-Strandrunde* (3.4 km · Badespaß & Kiesstrand)
-  3. *Großer Blindsee-Rundweg* (5.2 km · klassische Seeumrundung)
-  4. *Panorama-Runde Zugspitzblick* (7.2 km · Alpin mit Fernpass-Aufstieg)
-- **11 Hotspots & Realitäts-Ground-View:** Detaillierte Infos zu Badestellen, Tauchspots (*Versunkener Wald*), geologischen Muren, Mauttarifen und Infrastruktur inklusive Vor-Ort-Fotoansicht.
-- **3D-Kamera-Rundflug:** Vollautomatischer dynamischer Flugmodus entlang der Seeroute.
-- **Offline- & Mobile-optimiert:** Eigenständig lauffähig in WebCode / mobilem Browser auf Android.
+- **Echte Rundwege statt gezeichneter Linien.** Alle Touren sind geschlossene
+  Runden, die aus dem OSM-Wegenetz berechnet werden — Start = Ziel. Jede
+  Kilometer-, Höhenmeter- und Steigungsangabe stammt aus der Geometrie.
+- **Tour-Assistent mit vier Fragen**, die zusammen bestimmen, welche Runde
+  wirklich passt: gewünschte Rundengröße, Begleitung (Kinderwagen, kleine
+  Kinder, Hund, sportlich), akzeptierte Steigung und Schwerpunkte (Wasser,
+  Aussicht, Schatten, Sehenswürdigkeiten, Ruhe). Harte Anforderungen filtern,
+  weiche Wünsche gewichten — und der Vorschlag wird begründet.
+- **Vor-Ort-Ansicht in 3D.** Die Kamera wird auf Geländehöhe an den Ort gesetzt;
+  per Ziehen schaut man sich um. Wo offene Bodenfotos existieren
+  ([Panoramax](https://panoramax.xyz)), gibt es zusätzlich das echte Foto.
+- **Bedienung über ein Bottom-Sheet** in drei Stufen (Vorschau / halb / ganz)
+  mit den Reitern Runden · Orte · Details, plus Höhenprofil je Runde.
 
-## 🚀 Schnellstart
+## Die Runden
 
-Öffne einfach [`index.html`](index.html) direkt im Browser oder über einen lokalen Webserver:
+Berechnet aus dem OpenStreetMap-Wegenetz; die Werte erzeugt `route_engine.py`:
+
+| Runde | Länge | Höhenmeter | Am Ufer | Schatten | Kinderwagen |
+|---|---|---|---|---|---|
+| Kleine Uferrunde | 1,41 km | 22 Hm | 77 % | – | ✅ |
+| Kurze Waldrunde | 2,13 km | 55 Hm | – | 63 % | ✅ |
+| Seeumrundung | 3,64 km | 66 Hm | 100 % | – | – |
+| Große Runde | 5,94 km | 135 Hm | 58 % | – | – |
+| Panorama-Runde | 7,78 km | 231 Hm | 34 % | – | – |
+
+## Aufbau
+
+| Datei | Zweck |
+|---|---|
+| `index.html` | fertige Anwendung (wird generiert — nicht direkt bearbeiten) |
+| `template.html` | Quelle für Oberfläche, Stile und Logik; `__DATA__` wird beim Build ersetzt |
+| `route_engine.py` | findet und bewertet die Rundwege im Wegenetz |
+| `build.py` | setzt Template und berechnete Daten zu `index.html` zusammen |
+| `fetch_osm.py` | holt die OSM-Rohdaten von Overpass nach `osm_cache.json` |
+| `hotspots.json` | die redaktionellen Ortsinhalte (Kosten, Zeiten, Regeln) |
+| `osm_cache.json` | zwischengespeicherte OSM-Daten, damit der Build offline läuft |
+| `dem_wide.asc` | Höhenmodell-Ausschnitt für Höhenmeter und Steigung |
+
+## Neu bauen
 
 ```bash
-# Lokaler HTTP-Server starten
-python3 -m http.server 8088
-
-# Im Browser aufrufen
-http://127.0.0.1:8088/index.html
+python3 build.py            # aus dem Cache bauen (dauert ~2 Min: Ringsuche)
+python3 build.py --fetch    # OSM-Daten vorher frisch von Overpass holen
 ```
 
-## 🛠️ Aufbau
+Nur Standardbibliothek, keine Abhängigkeiten. Für einen neuen
+Höhenmodell-Ausschnitt wird `gdal_translate` und die (nicht versionierte)
+Kachel `dem_N47_E010.tif` gebraucht — für einen normalen Build reicht das
+mitgelieferte `dem_wide.asc`.
 
-- `index.html` – Hauptanwendung (Standalone Single-Page Web App)
-- `blindsee_3d_familienkarte.html` – Standalone-Familienkarte
-- `build_map.py` – Python-Generatorskript zur Verarbeitung von OSM-Geodaten & DEM-Höhenprofilen
-- `blindsee_data.json` & `overpass_blindsee.json` – Gecachte Vektor- und POI-Rohdaten
+Lokal ansehen:
 
-## 📄 Lizenz
-MIT License
+```bash
+python3 -m http.server 8088   # dann http://127.0.0.1:8088/
+```
+
+## Wie die Runden gefunden werden
+
+1. Wegenetz als Graph aufbauen (Verbindung über gemeinsame OSM-Knoten)
+2. Grad-2-Ketten zu Super-Kanten kontrahieren → kleiner Kreuzungsgraph
+3. Fundamentalzyklen über einen Spannbaum bestimmen
+4. Benachbarte Zyklen per XOR zu größeren Ringen kombinieren
+5. Pro Längenklasse den Ring wählen, der kompakt **und** nah am Wasser ist
+6. Mit echten Kennzahlen anreichern: Höhenprofil aus dem DEM (bilinear
+   interpoliert, auf 50-m-Schritte resampelt), Belag und Treppen aus den
+   OSM-Tags, Schattenanteil aus Waldflächen, Uferanteil aus einem
+   vorberechneten Abstandsraster
+
+## Grenzen
+
+- **Kein Street View.** Echte Bodenfotos gibt es über Panoramax nur dort, wo
+  jemand welche aufgenommen hat — am Blindsee im Wesentlichen entlang der
+  B179, nicht auf den Uferpfaden. Für alle anderen Orte zeigt die
+  Vor-Ort-Ansicht das 3D-Gelände. MapLibre kann die Kamera nicht frei
+  platzieren, deshalb steht sie je nach Zoom einige Meter über dem Boden statt
+  exakt auf Augenhöhe.
+- Steigungswerte stammen aus einem ~30-m-Höhenmodell. Kurze Rampen können
+  dadurch geglättet sein.
+- Die Wegequalität hängt an den OSM-Tags. Wo `surface` fehlt, wird neutral
+  bewertet — die Kinderwagen-Einstufung ist ein Anhaltspunkt, keine Garantie.
+
+## Daten
+
+Wege und Orte © OpenStreetMap-Mitwirkende (ODbL) · Luftbild © Esri, Maxar,
+Earthstar Geographics · Höhendaten Mapzen/AWS Terrain Tiles ·
+Bodenfotos © Panoramax-Mitwirkende (CC-BY-SA)
+
+## Lizenz
+
+MIT

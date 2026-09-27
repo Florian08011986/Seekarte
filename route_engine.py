@@ -1,0 +1,695 @@
+"""
+Routen-Motor fuer die Blindsee-Karte.
+
+Findet ECHTE Rundwege im OSM-Wegenetz statt erfundener Koordinatenlisten:
+  1. Wegenetz als Graph aufbauen (Knoten ueber gemeinsame OSM-Node-IDs verbunden)
+  2. Grad-2-Ketten zu Super-Kanten kontrahieren -> kleiner Kreuzungsgraph
+  3. Fundamentalzyklen ueber Spannbaum bestimmen
+  4. Benachbarte Zyklen per XOR zu groesseren Ringen kombinieren
+  5. Pro Laengenklasse den kompaktesten seenahen Ring waehlen
+  6. Jede Runde mit echten Kennzahlen anreichern (Hoehenmeter aus DEM, Steigung,
+     Belag, Treppen, Schattenanteil, Uferanteil, angebundene Hotspots)
+
+Alle ausgegebenen Kilometer-, Hoehenmeter- und Steigungswerte sind aus der
+Geometrie gerechnet, nicht hartkodiert.
+"""
+import json
+import math
+import os
+import collections
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OSM_CACHE = os.path.join(HERE, "osm_cache.json")
+DEM_ASC = os.path.join(HERE, "dem_wide.asc")
+DEM_TIF = os.path.join(HERE, "dem_N47_E010.tif")
+
+# Ausschnitt fuer DEM und Overpass
+LAT_MIN, LAT_MAX = 47.335, 47.392
+LON_MIN, LON_MAX = 10.815, 10.885
+
+# Wege auf denen man zu Fuss unterwegs sein kann
+WALKABLE = {
+    "path", "footway", "track", "pedestrian", "steps", "cycleway",
+    "bridleway", "residential", "service", "unclassified", "living_street",
+}
+# Belag der als kinderwagentauglich durchgeht
+GOOD_SURFACE = {"asphalt", "paved", "concrete", "compacted", "fine_gravel", "gravel"}
+
+LOOP_BANDS = [
+    # (min_km, max_km, id, Anzeigename)
+    (1.0, 1.8, "mini", "Kleine Uferrunde"),
+    (1.8, 2.8, "kurz", "Kurze Waldrunde"),
+    (2.8, 4.2, "see", "Seeumrundung"),
+    (4.2, 6.2, "gross", "Grosse Runde"),
+    (6.2, 11.0, "pano", "Panorama-Runde"),
+]
+
+
+# ---------------------------------------------------------------- Geometrie
+
+def haversine(a, b):
+    """Distanz in Metern zwischen zwei (lat, lon)-Tupeln."""
+    R = 6371000.0
+    p1, p2 = math.radians(a[0]), math.radians(b[0])
+    dphi = math.radians(b[0] - a[0])
+    dlam = math.radians(b[1] - a[1])
+    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.atan2(math.sqrt(h), math.sqrt(1 - h))
+
+
+def point_in_ring(pt, ring):
+    """Ray-Casting auf einem Ring aus (lat, lon)-Tupeln."""
+    y, x = pt
+    inside = False
+    n = len(ring)
+    for i in range(n):
+        y1, x1 = ring[i]
+        y2, x2 = ring[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xin = (x2 - x1) * (y - y1) / (y2 - y1) + x1
+            if x < xin:
+                inside = not inside
+    return inside
+
+
+def dist_to_polyline(pt, line):
+    """Kuerzester Abstand (m) von pt zu einer Polylinie aus (lat, lon)."""
+    best = float("inf")
+    lat0 = pt[0]
+    kx = 111320.0 * math.cos(math.radians(lat0))
+    ky = 110540.0
+    px, py = pt[1] * kx, pt[0] * ky
+    for a, b in zip(line, line[1:]):
+        ax, ay = a[1] * kx, a[0] * ky
+        bx, by = b[1] * kx, b[0] * ky
+        dx, dy = bx - ax, by - ay
+        L2 = dx * dx + dy * dy
+        if L2 == 0:
+            d = math.hypot(px - ax, py - ay)
+        else:
+            t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / L2))
+            d = math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+        if d < best:
+            best = d
+    return best
+
+
+# ---------------------------------------------------------------- Hoehendaten
+
+def load_dem():
+    """Liefert get_z(lat, lon) -> Meter ueber NN aus dem ASCII-Grid."""
+    if not os.path.exists(DEM_ASC):
+        os.system(
+            f"gdal_translate -q -of AAIGrid -projwin {LON_MIN} {LAT_MAX} "
+            f"{LON_MAX} {LAT_MIN} {DEM_TIF} {DEM_ASC}"
+        )
+    hdr = {}
+    values = []
+    with open(DEM_ASC) as f:
+        for line in f:
+            parts = line.split()
+            if not parts:
+                continue
+            first = parts[0].replace(".", "").replace("-", "")
+            if len(parts) == 2 and not first.isdigit():
+                hdr[parts[0].lower()] = float(parts[1])
+            else:
+                values.extend(float(v) for v in parts)
+
+    ncols = int(hdr["ncols"])
+    nrows = int(hdr["nrows"])
+    xll = hdr["xllcorner"]
+    yll = hdr["yllcorner"]
+    cell = hdr["cellsize"]
+    nodata = hdr.get("nodata_value", -9999.0)
+
+    def sample(r, c):
+        r = min(nrows - 1, max(0, r))
+        c = min(ncols - 1, max(0, c))
+        return values[r * ncols + c]
+
+    def get_z(lat, lon):
+        # Bilineare Interpolation: das Raster ist ~30 m grob, die Wegpunkte
+        # liegen deutlich dichter. Ohne Interpolation springt die Hoehe
+        # treppenfoermig und erzeugt Steigungen, die es nicht gibt.
+        col = (lon - xll) / cell - 0.5
+        row = (yll + nrows * cell - lat) / cell - 0.5
+        c0, r0 = int(math.floor(col)), int(math.floor(row))
+        fc, fr = col - c0, row - r0
+        z00, z10 = sample(r0, c0), sample(r0, c0 + 1)
+        z01, z11 = sample(r0 + 1, c0), sample(r0 + 1, c0 + 1)
+        if nodata in (z00, z10, z01, z11):
+            return None
+        top = z00 * (1 - fc) + z10 * fc
+        bot = z01 * (1 - fc) + z11 * fc
+        return top * (1 - fr) + bot * fr
+
+    return get_z
+
+
+# ---------------------------------------------------------------- OSM laden
+
+def build_lake_grid(lake_ring, pad_deg=0.006, cell_deg=0.00012):
+    """
+    Vorberechnetes Raster 'Abstand zum Seeufer'.
+
+    Die Uferdistanz wird fuer jede Runde und jeden Punkt gebraucht; direkt gegen
+    die 3,7-km-Uferlinie zu rechnen waere bei tausenden Kandidatenringen zu
+    langsam. Das Raster deckt nur die Seeumgebung ab - ausserhalb gilt pauschal
+    'weit weg'.
+    """
+    if not lake_ring:
+        return None
+    closed = lake_ring + [lake_ring[0]]
+    lat0 = min(p[0] for p in closed) - pad_deg
+    lat1 = max(p[0] for p in closed) + pad_deg
+    lon0 = min(p[1] for p in closed) - pad_deg
+    lon1 = max(p[1] for p in closed) + pad_deg
+    nrows = int((lat1 - lat0) / cell_deg) + 1
+    ncols = int((lon1 - lon0) / cell_deg) + 1
+    grid = [0.0] * (nrows * ncols)
+    for r in range(nrows):
+        lat = lat0 + r * cell_deg
+        for c in range(ncols):
+            lon = lon0 + c * cell_deg
+            grid[r * ncols + c] = dist_to_polyline((lat, lon), closed)
+    return {
+        "lat0": lat0, "lon0": lon0, "cell": cell_deg,
+        "nrows": nrows, "ncols": ncols, "grid": grid,
+    }
+
+
+def lake_distance(grid, lat, lon):
+    """Abstand zum Seeufer in Metern (999999 ausserhalb des Rasters)."""
+    if grid is None:
+        return 999999.0
+    r = int((lat - grid["lat0"]) / grid["cell"])
+    c = int((lon - grid["lon0"]) / grid["cell"])
+    if r < 0 or c < 0 or r >= grid["nrows"] or c >= grid["ncols"]:
+        return 999999.0
+    return grid["grid"][r * grid["ncols"] + c]
+
+
+def load_osm():
+    data = json.load(open(OSM_CACHE))
+    els = data["elements"]
+
+    nodes = {e["id"]: (e["lat"], e["lon"]) for e in els if e["type"] == "node"}
+    ways = [e for e in els if e["type"] == "way"]
+
+    adj = collections.defaultdict(set)
+    edge_tags = {}
+    for w in ways:
+        tags = w.get("tags", {})
+        if tags.get("highway") not in WALKABLE:
+            continue
+        ns = [n for n in w["nodes"] if n in nodes]
+        for a, b in zip(ns, ns[1:]):
+            if a == b:
+                continue
+            adj[a].add(b)
+            adj[b].add(a)
+            edge_tags[frozenset((a, b))] = tags
+
+    # See (groesste Wasserflaeche)
+    lake = None
+    for w in ways:
+        if w.get("tags", {}).get("natural") != "water":
+            continue
+        ring = [nodes[n] for n in w["nodes"] if n in nodes]
+        if len(ring) < 4:
+            continue
+        span = max(p[0] for p in ring) - min(p[0] for p in ring)
+        if lake is None or span > lake[0]:
+            lake = (span, w.get("tags", {}).get("name", "See"), ring)
+    lake_ring = lake[2] if lake else []
+    lake_name = lake[1] if lake else "See"
+    if lake_ring:
+        lake_center = (
+            sum(p[0] for p in lake_ring) / len(lake_ring),
+            sum(p[1] for p in lake_ring) / len(lake_ring),
+        )
+    else:
+        lake_center = (47.36269, 10.84931)
+
+    # Waldflaechen fuer den Schattenanteil
+    forests = []
+    for w in ways:
+        tags = w.get("tags", {})
+        if tags.get("natural") == "wood" or tags.get("landuse") == "forest":
+            ring = [nodes[n] for n in w["nodes"] if n in nodes]
+            if len(ring) >= 4:
+                lats = [p[0] for p in ring]
+                lons = [p[1] for p in ring]
+                forests.append(((min(lats), max(lats), min(lons), max(lons)), ring))
+
+    return {
+        "nodes": nodes,
+        "adj": adj,
+        "edge_tags": edge_tags,
+        "lake_ring": lake_ring,
+        "lake_name": lake_name,
+        "lake_center": lake_center,
+        "lake_grid": build_lake_grid(lake_ring),
+        "forests": forests,
+    }
+
+
+# ---------------------------------------------------------------- Graph
+
+def contract(nodes, adj, edge_tags):
+    """Grad-2-Ketten zu Super-Kanten zusammenfassen."""
+    junctions = {n for n in adj if len(adj[n]) != 2}
+    if not junctions:
+        junctions = {next(iter(adj))}
+
+    segs = []
+    walked = set()
+    for j in junctions:
+        for nb in adj[j]:
+            if (j, nb) in walked:
+                continue
+            path = [j, nb]
+            walked.add((j, nb))
+            prev, cur = j, nb
+            while cur not in junctions:
+                nxt = [x for x in adj[cur] if x != prev]
+                if not nxt:
+                    break
+                prev, cur = cur, nxt[0]
+                path.append(cur)
+            walked.add((path[-1], path[-2]))
+            length = sum(haversine(nodes[a], nodes[b]) for a, b in zip(path, path[1:]))
+            tags = edge_tags.get(frozenset((path[0], path[1])), {})
+            segs.append({
+                "u": path[0], "v": path[-1], "path": path,
+                "len": length, "tags": tags,
+            })
+    return junctions, segs
+
+
+def largest_component(segs):
+    a = collections.defaultdict(set)
+    for s in segs:
+        a[s["u"]].add(s["v"])
+        a[s["v"]].add(s["u"])
+    seen, best = set(), set()
+    for n in a:
+        if n in seen:
+            continue
+        stack, comp = [n], set()
+        while stack:
+            x = stack.pop()
+            if x in comp:
+                continue
+            comp.add(x)
+            seen.add(x)
+            stack.extend(a[x] - comp)
+        if len(comp) > len(best):
+            best = comp
+    return best
+
+
+def cycle_basis(segs, comp):
+    """Fundamentalzyklen als frozenset von Segment-Indizes."""
+    a = collections.defaultdict(list)
+    for i, s in enumerate(segs):
+        if s["u"] in comp and s["v"] in comp:
+            a[s["u"]].append((s["v"], i))
+            a[s["v"]].append((s["u"], i))
+
+    parent, pedge, tree = {}, {}, set()
+    root = next(iter(comp))
+    parent[root] = None
+    stack, seen = [root], {root}
+    while stack:
+        x = stack.pop()
+        for y, i in a[x]:
+            if y not in seen:
+                seen.add(y)
+                parent[y] = x
+                pedge[y] = i
+                tree.add(i)
+                stack.append(y)
+
+    def to_root(n):
+        out = []
+        while parent.get(n) is not None:
+            out.append(pedge[n])
+            n = parent[n]
+        return set(out)
+
+    cycles = []
+    for i, s in enumerate(segs):
+        if i in tree or s["u"] not in seen or s["v"] not in seen:
+            continue
+        cycles.append(frozenset((to_root(s["u"]) ^ to_root(s["v"])) | {i}))
+    return cycles
+
+
+def ring_nodes(segs, edgeset):
+    """Prueft ob die Kantenmenge EIN einfacher Ring ist -> geordnete Knotenfolge."""
+    deg = collections.defaultdict(int)
+    a = collections.defaultdict(list)
+    for i in edgeset:
+        s = segs[i]
+        deg[s["u"]] += 1
+        deg[s["v"]] += 1
+        a[s["u"]].append((s["v"], i))
+        a[s["v"]].append((s["u"], i))
+    if not deg or any(d != 2 for d in deg.values()):
+        return None
+
+    start = next(iter(deg))
+    out, used, cur = [], set(), start
+    while True:
+        nxt = next(((v, i) for v, i in a[cur] if i not in used), None)
+        if nxt is None:
+            break
+        v, i = nxt
+        used.add(i)
+        s = segs[i]
+        p = s["path"] if s["u"] == cur else list(reversed(s["path"]))
+        out.extend(p[:-1])
+        cur = v
+        if cur == start:
+            break
+    if len(used) != len(edgeset) or cur != start:
+        return None  # zerfaellt in mehrere Ringe
+    out.append(start)
+    return out
+
+
+def ring_shape(nodes, ring):
+    """Laenge, Flaeche und isoperimetrischer Quotient (1.0 = Kreis)."""
+    pts = [nodes[n] for n in ring]
+    length = sum(haversine(a, b) for a, b in zip(pts, pts[1:]))
+    clat = sum(p[0] for p in pts) / len(pts)
+    clon = sum(p[1] for p in pts) / len(pts)
+    kx = 111320.0 * math.cos(math.radians(clat))
+    ky = 110540.0
+    xy = [((p[1] - clon) * kx, (p[0] - clat) * ky) for p in pts]
+    area = abs(sum(xy[i][0] * xy[i + 1][1] - xy[i + 1][0] * xy[i][1]
+                   for i in range(len(xy) - 1)) / 2)
+    iq = 4 * math.pi * area / (length * length) if length > 0 else 0.0
+    return length, area, iq, (clat, clon)
+
+
+# ---------------------------------------------------------------- Loop-Suche
+
+def find_loops(osm, max_depth=8, frontier_cap=12000):
+    nodes, adj, edge_tags = osm["nodes"], osm["adj"], osm["edge_tags"]
+    lake_center = osm["lake_center"]
+
+    junctions, segs = contract(nodes, adj, edge_tags)
+    comp = largest_component(segs)
+    base = cycle_basis(segs, comp)
+
+    simple = {}
+    for c in base:
+        r = ring_nodes(segs, c)
+        if r:
+            simple[c] = r
+
+    neighbours = collections.defaultdict(set)
+    keys = list(simple)
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            if keys[i] & keys[j]:
+                neighbours[keys[i]].add(keys[j])
+                neighbours[keys[j]].add(keys[i])
+
+    grid = osm.get("lake_grid")
+
+    def near_lake(ring):
+        return min(haversine(nodes[n], lake_center) for n in ring)
+
+    def shore_share(ring):
+        """Anteil der Ringpunkte innerhalb 120 m vom Ufer."""
+        hit = sum(1 for n in ring
+                  if lake_distance(grid, nodes[n][0], nodes[n][1]) < 120)
+        return hit / len(ring) if ring else 0.0
+
+    seeds = [c for c in simple if near_lake(simple[c]) < 900]
+    found = {}
+    frontier = [(frozenset(s), {s}) for s in seeds]
+
+    for _ in range(max_depth):
+        nxt = []
+        for edges, used in frontier:
+            ring = ring_nodes(segs, edges)
+            if ring:
+                length, area, iq, centre = ring_shape(nodes, ring)
+                dmin = near_lake(ring)
+                if 900 <= length <= 11500 and iq > 0.12 and dmin < 700:
+                    if edges not in found:
+                        found[edges] = (length, iq, dmin, ring, shore_share(ring))
+            pool = set().union(*(neighbours[u] for u in used)) if used else set()
+            for nb in pool - used:
+                merged = edges ^ nb
+                if merged:
+                    nxt.append((merged, used | {nb}))
+        dedup, seen = [], set()
+        for e, u in nxt:
+            if e in seen:
+                continue
+            seen.add(e)
+            dedup.append((e, u))
+        frontier = dedup[:frontier_cap]
+        if not frontier:
+            break
+
+    return segs, found
+
+
+def pick_per_band(osm, found):
+    """Pro Laengenklasse den kompaktesten, seenaechsten Ring."""
+    best = {}
+    for length, iq, dmin, ring, shore in found.values():
+        km = length / 1000.0
+        for lo, hi, rid, name in LOOP_BANDS:
+            if lo <= km < hi:
+                # Kompakte Form UND Naehe zum Wasser - beides macht eine Runde
+                # erst zu einer, die man auch gehen will.
+                score = 0.5 * iq + 0.5 * shore - dmin / 40000.0
+                if rid not in best or score > best[rid][0]:
+                    best[rid] = (score, length, iq, dmin, ring, name, shore)
+    return best
+
+
+# ---------------------------------------------------------------- Kennzahlen
+
+def enrich(osm, get_z, ring, hotspots):
+    """Berechnet die echten Kennzahlen einer Runde."""
+    nodes = osm["nodes"]
+    pts = [nodes[n] for n in ring]
+
+    # Hoehenprofil glaetten, damit DEM-Rauschen keine Fantasie-Hoehenmeter macht
+    raw = [get_z(p[0], p[1]) for p in pts]
+    zs, last = [], None
+    for z in raw:
+        if z is None:
+            z = last if last is not None else 1100.0
+        last = z
+        zs.append(z)
+    win = 5
+    smooth = [
+        sum(zs[max(0, i - win): min(len(zs), i + win + 1)])
+        / len(zs[max(0, i - win): min(len(zs), i + win + 1)])
+        for i in range(len(zs))
+    ]
+
+    seg_lengths = [haversine(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
+    total = sum(seg_lengths)
+
+    # Das DEM hat ~30 m Rasterweite, die Wegpunkte liegen oft nur 5 m auseinander.
+    # Direkt Punkt-zu-Punkt gerechnet ergaebe das Fantasie-Steigungen von 40 %+.
+    # Deshalb das Hoehenprofil auf feste Schritte resampeln und darauf rechnen.
+    STEP = 50.0
+    cum = [0.0]
+    for d in seg_lengths:
+        cum.append(cum[-1] + d)
+
+    def z_at(dist):
+        if dist <= 0:
+            return smooth[0]
+        if dist >= cum[-1]:
+            return smooth[-1]
+        lo, hi = 0, len(cum) - 1
+        while lo < hi - 1:
+            mid = (lo + hi) // 2
+            if cum[mid] <= dist:
+                lo = mid
+            else:
+                hi = mid
+        span = cum[hi] - cum[lo]
+        t = (dist - cum[lo]) / span if span > 0 else 0.0
+        return smooth[lo] + t * (smooth[hi] - smooth[lo])
+
+    n_steps = max(2, int(total // STEP))
+    prof = [z_at(i * total / n_steps) for i in range(n_steps + 1)]
+
+    ascent = descent = 0.0
+    max_slope = 0.0
+    seg_d = total / n_steps
+    steep = 0
+    slopes = []
+    for i in range(len(prof) - 1):
+        dz = prof[i + 1] - prof[i]
+        if dz > 0:
+            ascent += dz
+        else:
+            descent -= dz
+        sl = abs(dz) / seg_d * 100.0
+        slopes.append(sl)
+        max_slope = max(max_slope, sl)
+        if sl > 12.0:
+            steep += 1
+    # Anteil der Strecke der wirklich steil ist. Eine einzelne kurze Rampe
+    # darf eine sonst flache Runde nicht disqualifizieren - der Maximalwert
+    # allein waere dafuer ein zu grobes Mass.
+    steep_share = steep / len(slopes) if slopes else 0.0
+
+    # Belag / Treppen aus den OSM-Tags der beteiligten Kanten
+    edge_tags = osm["edge_tags"]
+    good = bad = 0.0
+    steps_m = 0.0
+    for i in range(len(ring) - 1):
+        tags = edge_tags.get(frozenset((ring[i], ring[i + 1])), {})
+        d = seg_lengths[i] if i < len(seg_lengths) else 0
+        if tags.get("highway") == "steps":
+            steps_m += d
+        surface = tags.get("surface")
+        tracktype = tags.get("tracktype")
+        if surface in GOOD_SURFACE or tracktype in ("grade1", "grade2"):
+            good += d
+        elif surface or tracktype:
+            bad += d
+    known = good + bad
+    surface_quality = (good / known) if known > 0 else 0.5
+
+    # Uferanteil
+    grid = osm.get("lake_grid")
+    near_water = 0.0
+    for i, p in enumerate(pts[:-1]):
+        if lake_distance(grid, p[0], p[1]) < 120:
+            near_water += seg_lengths[i]
+    lake_share = near_water / total if total else 0.0
+
+    # Schattenanteil (Waldflaechen)
+    shaded = 0.0
+    for i, p in enumerate(pts[:-1]):
+        for (bbox, poly) in osm["forests"]:
+            if bbox[0] <= p[0] <= bbox[1] and bbox[2] <= p[1] <= bbox[3]:
+                if point_in_ring(p, poly):
+                    shaded += seg_lengths[i]
+                    break
+    shade_share = shaded / total if total else 0.0
+
+    # Angebundene Hotspots
+    on_route = []
+    for hs in hotspots:
+        d = dist_to_polyline((hs["lat"], hs["lon"]), pts)
+        if d < 160:
+            on_route.append({"id": hs["id"], "detour_m": round(d)})
+    on_route.sort(key=lambda h: h["detour_m"])
+
+    stroller_ok = (
+        steps_m < 1
+        and steep_share < 0.08
+        and surface_quality > 0.45
+        and (ascent / (total / 1000.0)) < 60
+    )
+    dog_ok = steps_m < 40
+
+    # Gehzeit nach DIN 33466 / SAC: 4 km/h horizontal, 300 Hm/h Aufstieg
+    hours = total / 4000.0 + ascent / 300.0
+    minutes = int(round(hours * 60))
+
+    return {
+        "km": round(total / 1000.0, 2),
+        "ascent_m": int(round(ascent)),
+        "descent_m": int(round(descent)),
+        "max_slope_pct": round(max_slope, 1),
+        "steep_share": round(steep_share, 2),
+        "steps_m": int(round(steps_m)),
+        "surface_quality": round(surface_quality, 2),
+        "lake_share": round(lake_share, 2),
+        "shade_share": round(shade_share, 2),
+        "stroller_ok": stroller_ok,
+        "dog_ok": dog_ok,
+        "minutes": minutes,
+        "duration": f"{minutes // 60}h {minutes % 60:02d}m" if minutes >= 60 else f"{minutes} Min",
+        "highpoint_m": int(round(max(smooth))),
+        "lowpoint_m": int(round(min(smooth))),
+        "profile": [round(prof[i * len(prof) // 60 if len(prof) > 60 else i], 1)
+                    for i in range(min(60, len(prof)))],
+        "hotspots": [h["id"] for h in on_route],
+        "hotspot_detours": {h["id"]: h["detour_m"] for h in on_route},
+        "coords": [[round(p[1], 6), round(p[0], 6)] for p in pts],
+    }
+
+
+def difficulty(stats):
+    if stats["stroller_ok"] and stats["km"] <= 3.0:
+        return "Leicht"
+    if stats["ascent_m"] < 120 and stats["max_slope_pct"] < 14:
+        return "Leicht"
+    if stats["ascent_m"] < 320 and stats["max_slope_pct"] < 22:
+        return "Mittel"
+    return "Sportlich"
+
+
+def build_routes(hotspots, verbose=False):
+    """Hauptfunktion: liefert die fertige Routenliste fuer die Karte."""
+    osm = load_osm()
+    get_z = load_dem()
+    segs, found = find_loops(osm)
+    picked = pick_per_band(osm, found)
+    if verbose:
+        print(f"[route_engine] {len(found)} saubere seenahe Ringe gefunden")
+
+    routes = []
+    for lo, hi, rid, name in LOOP_BANDS:
+        if rid not in picked:
+            if verbose:
+                print(f"[route_engine] {name}: kein echter Ring in {lo}-{hi} km")
+            continue
+        score, length, iq, dmin, ring, label, shore = picked[rid]
+        stats = enrich(osm, get_z, ring, hotspots)
+        stats.update({
+            "id": rid,
+            "name": label,
+            "compactness": round(iq, 2),
+            "difficulty": difficulty(stats),
+        })
+        routes.append(stats)
+        if verbose:
+            print(
+                f"[route_engine] {label:20s} {stats['km']:5.2f} km  "
+                f"{stats['ascent_m']:4d} Hm  max {stats['max_slope_pct']:4.1f}%  "
+                f"steil {stats['steep_share']:.2f}  "
+            f"Belag {stats['surface_quality']:.2f}  Ufer {stats['lake_share']:.2f}  "
+                f"Schatten {stats['shade_share']:.2f}  "
+                f"{'Kinderwagen' if stats['stroller_ok'] else 'kein Kinderwagen'}  "
+                f"Hotspots {len(stats['hotspots'])}"
+            )
+    routes.sort(key=lambda r: r["km"])
+    return routes
+
+
+if __name__ == "__main__":
+    demo = [
+        {"id": "start", "lat": 47.3655, "lon": 10.8512},
+        {"id": "ancient_pine", "lat": 47.3638, "lon": 10.8528},
+        {"id": "viewpoint", "lat": 47.3622, "lon": 10.8431},
+        {"id": "beach", "lat": 47.3590, "lon": 10.8480},
+        {"id": "mountain_stream", "lat": 47.3582, "lon": 10.8450},
+        {"id": "fisherman_bay", "lat": 47.3608, "lon": 10.8415},
+        {"id": "sunken_forest", "lat": 47.3630, "lon": 10.8420},
+        {"id": "cliff_path", "lat": 47.3648, "lon": 10.8438},
+        {"id": "mudslide", "lat": 47.3660, "lon": 10.8485},
+        {"id": "north_forest", "lat": 47.3645, "lon": 10.8450},
+        {"id": "fernpass_pano", "lat": 47.3672, "lon": 10.8525},
+    ]
+    build_routes(demo, verbose=True)

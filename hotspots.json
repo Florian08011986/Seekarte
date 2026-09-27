@@ -1,0 +1,249 @@
+[
+  {
+    "id": "start",
+    "name": "Parkplatz & Bootshaus",
+    "lat": 47.3655,
+    "lon": 10.8512,
+    "dist_km": 0.0,
+    "duration": "10–20 Min",
+    "category": "photo",
+    "bearing": 215,
+    "fees": "Mautstraße: 15–20 € pro PKW (inkl. Parken & Seezugang)",
+    "opening_hours": "Schranke geöffnet: 07:00 – 20:00 Uhr (Nachtparkverbot)",
+    "infrastructure": "WCs am Bootshaus, Müllstation, Schotterparkplatz",
+    "rules": "Camping & Übernachten im Fahrzeug streng verboten",
+    "desc": "Der ideale Rundweg-Startpunkt direkt am Nordost-Ufer. Schotterparkplatz vorhanden. Der Einstieg in den Uferpfad ist verwurzelt, aber gut begehbar.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/6/66/Blindsee_v_Rasthaus_Zugspitzblick.jpg"
+      }
+    ]
+  },
+  {
+    "id": "ancient_pine",
+    "name": "Zirben- & Mooswald (Ostufer)",
+    "lat": 47.3638,
+    "lon": 10.8528,
+    "dist_km": 0.7,
+    "duration": "10–15 Min",
+    "category": "nature",
+    "bearing": 200,
+    "fees": "Kostenlos (in Maut enthalten)",
+    "opening_hours": "Ganzjährig frei begehbar",
+    "infrastructure": "Naturbelassener Waldpfad, schattige Raststeine",
+    "rules": "Naturschutzgebiet: Auf den Pfaden bleiben",
+    "desc": "Uralter Bergmischwald mit duftenden Zirben und gigantischen, moosbedeckten Felsblöcken aus dem prähistorischen Bergsturz. Wunderbarer Schattenspender.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/e0/Blindsee_und_Zugspitze_von_Weg_nach_Biberwier.jpg"
+      }
+    ]
+  },
+  {
+    "id": "viewpoint",
+    "name": "Aussichtspunkt Blindsee",
+    "lat": 47.3622,
+    "lon": 10.8431,
+    "dist_km": 1.2,
+    "duration": "20–30 Min",
+    "category": "photo",
+    "bearing": 65,
+    "fees": "Kostenlos",
+    "opening_hours": "Rund um die Uhr frei zugänglich",
+    "infrastructure": "Aussichtsbank mit Panoramablick",
+    "rules": "Fotodrohnen im Naturschutzgebiet verboten",
+    "desc": "Markanter Panoramablick über das türkisgrüne Wasser hinüber zum mächtigen Wetterstein- und Zugspitzmassiv.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/0/09/Ehrwald%2C_Weissensee_and_Zugspitze_-_panoramio.jpg"
+      }
+    ]
+  },
+  {
+    "id": "beach",
+    "name": "Natur-Kiesstrand & Rast",
+    "lat": 47.359,
+    "lon": 10.848,
+    "dist_km": 2.1,
+    "duration": "1–2 Std",
+    "category": "beach",
+    "bearing": 340,
+    "fees": "Baden kostenlos (in Maut enthalten)",
+    "opening_hours": "Baden von Sonnenaufgang bis Sonnenuntergang",
+    "infrastructure": "Naturbelassener Kiesstrand, keine WCs vor Ort",
+    "rules": "Offenes Feuer & Grillen verboten! Müll wieder mitnehmen",
+    "desc": "Idyllischer Natur-Kiesstrand am Südostufer. Flacher Einstieg, kristallklares Gebirgswasser (max 18-20°C). Ideal für Familien-Picknick.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/5/59/Blindsee_beach_2.jpg"
+      }
+    ]
+  },
+  {
+    "id": "mountain_stream",
+    "name": "Wildbach & Quellzulauf (Südufer)",
+    "lat": 47.3582,
+    "lon": 10.845,
+    "dist_km": 2.5,
+    "duration": "15–20 Min",
+    "category": "nature",
+    "bearing": 350,
+    "fees": "Kostenlos",
+    "opening_hours": "Frei zugänglich",
+    "infrastructure": "Flache Bachmündung, natürlicher Wasserspielplatz",
+    "rules": "Quellschutz: Bachlauf sauber halten",
+    "desc": "Eiskalter, kristallklarer Gebirgsbach, der von den Hängen der Grubigstein-Gruppe in den See stürzt. Perfekte Erfrischungsstation für Kinder.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/5/50/Blindsee_Kiesstrand.jpg"
+      }
+    ]
+  },
+  {
+    "id": "fisherman_bay",
+    "name": "Smaragdbucht & Fischergrund",
+    "lat": 47.3608,
+    "lon": 10.8415,
+    "dist_km": 2.8,
+    "duration": "15–30 Min",
+    "category": "beach",
+    "bearing": 80,
+    "fees": "Fischereikarte erforderlich (ca. 35 € Tagesticket)",
+    "opening_hours": "Fischen: Mai bis Oktober mit Lizenz",
+    "infrastructure": "Kiesufer, ruhige Liegeplätze",
+    "rules": "Schonzeiten beachten, Tiroler Fischerkarte Pflicht",
+    "desc": "Windgeschützte Bucht mit unvergleichlich smaragdgrünem Wasser. Durch das spiegelglatte Wasser kann man oft Saiblinge und Forellen am Grund beobachten.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/f/f6/Blindsee_Bucht_2.jpg"
+      }
+    ]
+  },
+  {
+    "id": "sunken_forest",
+    "name": "Versunkener Wald (Tauchspot)",
+    "lat": 47.363,
+    "lon": 10.842,
+    "dist_km": 3.2,
+    "duration": "15–30 Min",
+    "category": "nature",
+    "bearing": 110,
+    "fees": "Tauchberechtigung: 15–20 € Tagesticket (Pflicht)",
+    "opening_hours": "Tauchen tagsüber erlaubt (Ausgabe via Hotel Mohr)",
+    "infrastructure": "Taucheinstieg am Ostufer empfohlen, Bojen",
+    "rules": "Gültiger Tauchschein Pflicht! Baumstämme nicht berühren",
+    "desc": "Weltberühmter Tauchspot: Am Grund liegen seit Jahrhunderten konservierte Baumstämme eines prähistorischen Bergsturzes wie Mikado-Stäbe.",
+    "kid_suitability": "yellow",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Tauchfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/33/Blindsee_Underwater_Trees_2026-08-29.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cliff_path",
+    "name": "Felsensteig & Tiefblick (Westufer)",
+    "lat": 47.3648,
+    "lon": 10.8438,
+    "dist_km": 3.6,
+    "duration": "15–20 Min",
+    "category": "photo",
+    "bearing": 150,
+    "fees": "Kostenlos",
+    "opening_hours": "Begehbar bei Tageslicht & trockener Witterung",
+    "infrastructure": "Schmaler Felsenpfad, feste Wanderschuhe nötig",
+    "rules": "Nicht kinderwagentauglich! Trittsicherheit erforderlich",
+    "desc": "Der Pfad schlängelt sich hier leicht erhöht am felsigen Westufer entlang. Faszinierender Tiefblick auf den abrupten Farbübergang von türkisem Flachwasser zu tiefblauem Grund.",
+    "kid_suitability": "yellow",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/a/a2/Blindsee_von_Westen.jpg"
+      }
+    ]
+  },
+  {
+    "id": "mudslide",
+    "name": "Murenkegel & Geröllfeld 2020",
+    "lat": 47.366,
+    "lon": 10.8485,
+    "dist_km": 4.0,
+    "duration": "15 Min",
+    "category": "nature",
+    "bearing": 210,
+    "fees": "Kostenlos",
+    "opening_hours": "Frei zugänglich",
+    "infrastructure": "Grober Schotter- & Geröllweg",
+    "rules": "Bei Starkregen Steinschlaggefahr beachten",
+    "desc": "Geologisches Zeugnis einer massiven Schlammlawine aus 2020. Felsiger Pfadabschnitt, gute Wanderschuhe empfohlen.",
+    "kid_suitability": "yellow",
+    "realitySources": [
+      {
+        "type": "photo",
+        "provider": "Wikimedia Commons (Besucherfoto)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/6/67/Blindsee_-_slimy_object.jpg"
+      }
+    ]
+  },
+  {
+    "id": "north_forest",
+    "name": "Nordufer Schutzwald",
+    "lat": 47.3645,
+    "lon": 10.845,
+    "dist_km": 4.4,
+    "duration": "10 Min",
+    "category": "map",
+    "bearing": 160,
+    "fees": "Kostenlos",
+    "opening_hours": "Ganzjährig frei begehbar",
+    "infrastructure": "Schattiger Wald-Wanderweg",
+    "rules": "Bannwald: Pflanzen & Äste schonen",
+    "desc": "Dichter Bergwald am Nordhang. Demonstrator nach Regel 47: Keine Detailfotos oder Panoramen verfügbar - ehrlicher Satelliten-Fallback ohne Fake-Daten.",
+    "kid_suitability": "green",
+    "realitySources": []
+  },
+  {
+    "id": "fernpass_pano",
+    "name": "Rasthaus Zugspitzblick (B179)",
+    "lat": 47.3672,
+    "lon": 10.8525,
+    "dist_km": 4.8,
+    "duration": "30–45 Min",
+    "category": "360",
+    "bearing": 220,
+    "fees": "Parkplatz an Bundesstraße für Gäste kostenlos",
+    "opening_hours": "Rasthaus täglich 09:00 – 18:00 Uhr (saisonal)",
+    "infrastructure": "Restaurant, Aussichtsterrasse, WCs, Kiosk",
+    "rules": "Zufahrt direkt über Fernpassstraße B179",
+    "desc": "Erhöhte Passstraße mit Blick von oben auf den gesamten Blindsee. Auf der Fernpass-Bundesstraße B179 existiert reale Street-Level & Panoramax Abdeckung.",
+    "kid_suitability": "green",
+    "realitySources": [
+      {
+        "type": "360",
+        "provider": "Panoramax / OpenStreetMap",
+        "url": "https://panoramax.openstreetmap.fr"
+      }
+    ]
+  }
+]

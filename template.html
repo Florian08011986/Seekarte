@@ -1,509 +1,932 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Blindsee 3D-Familienkarte - Biberwier, Tirol</title>
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <style>
-        :root { --primary: #0078D7; --bg: #1a1a1a; --text: #f5f5f5; }
-        body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #000; color: var(--text); }
-        
-        #viewer-3d, #viewer-2d { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; transition: opacity 0.5s ease; }
-        #viewer-2d { opacity: 0; pointer-events: none; z-index: 5; background: #fff; }
-        #viewer-2d.active { opacity: 1; pointer-events: auto; }
-        
-        /* Floating UI */
-        #floating-ui { position: absolute; top: 15px; left: 15px; right: 15px; z-index: 20; display: flex; justify-content: space-between; pointer-events: none; }
-        .ui-btn { pointer-events: auto; background: rgba(20,20,20,0.85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 10px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); transition: all 0.2s; }
-        .ui-btn:hover { background: rgba(40,40,40,0.95); transform: scale(1.05); }
-        .ui-btn.active { background: var(--primary); border-color: var(--primary); }
-        
-        /* Bottom Sheet */
-        #bottom-sheet { position: absolute; bottom: -100%; left: 0; width: 100%; max-height: 50vh; background: rgba(25,25,25,0.95); backdrop-filter: blur(10px); z-index: 30; border-top-left-radius: 20px; border-top-right-radius: 20px; transition: bottom 0.4s cubic-bezier(0.1, 0.8, 0.2, 1); box-shadow: 0 -5px 25px rgba(0,0,0,0.5); overflow-y: auto; padding: 20px; box-sizing: border-box; }
-        #bottom-sheet.open { bottom: 0; }
-        .sheet-handle { width: 40px; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; margin: 0 auto 15px auto; }
-        
-        .hotspot-card { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 15px; margin-bottom: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.05); transition: background 0.2s; }
-        .hotspot-card:hover { background: rgba(255,255,255,0.1); }
-        .hotspot-title { font-size: 18px; font-weight: bold; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: space-between; }
-        .hotspot-desc { font-size: 14px; color: #ccc; margin: 0 0 10px 0; line-height: 1.4; }
-        .hotspot-meta { font-size: 12px; color: #999; display: flex; justify-content: space-between; }
-        
-        .badge { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
-        .badge.green { background: rgba(0,200,80,0.2); color: #4ade80; border: 1px solid rgba(0,200,80,0.4); }
-        .badge.yellow { background: rgba(250,200,0,0.2); color: #facc15; border: 1px solid rgba(250,200,0,0.4); }
-        .badge.red { background: rgba(250,50,50,0.2); color: #f87171; border: 1px solid rgba(250,50,50,0.4); }
-        
-        /* Intro Overlay */
-        #intro-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: #000; z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 2s ease; pointer-events: none; }
-        #intro-title { font-size: 32px; font-weight: bold; letter-spacing: 2px; opacity: 0; transition: opacity 1s ease; text-align: center; }
-        #intro-subtitle { font-size: 16px; color: #aaa; margin-top: 10px; opacity: 0; transition: opacity 1s ease 0.5s; text-align: center; }
-        
-        /* Attribution */
-        #attribution { position: absolute; bottom: 10px; right: 10px; z-index: 10; font-size: 10px; color: rgba(255,255,255,0.6); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; pointer-events: auto; }
-        #attribution a { color: #fff; text-decoration: none; }
-        
-        /* Loading */
-        #loading { position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); z-index: 100; font-weight: bold; font-size: 18px; }
-        
-        /* HTML Popup (3D space mapped to screen) */
-        .html-popup { position: absolute; background: rgba(20,20,20,0.9); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; color: white; font-size: 14px; pointer-events: none; opacity: 0; transition: opacity 0.3s; transform: translate(-50%, -100%); margin-top: -20px; z-index: 15; min-width: 150px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
-        .html-popup::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); border-width: 8px 8px 0; border-style: solid; border-color: rgba(20,20,20,0.9) transparent transparent transparent; }
-        .html-popup.visible { opacity: 1; }
-    </style>
-    <!-- Import Maps -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-                "tween": "https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.esm.js"
-            }
-        }
-    </script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0d1117">
+<title>Blindsee · Tourenkarte</title>
+<meta name="description" content="Interaktive 3D-Karte mit echten Rundwegen rund um den Blindsee in Tirol.">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface-2:#1f262e; --line:#2b333d;
+  --text:#e9eef5; --muted:#9aa7b5; --faint:#6b7885;
+  --accent:#4aa8ff; --accent-soft:rgba(74,168,255,.14);
+  --green:#3fb950; --amber:#d29922; --red:#f85149;
+  --sheet-peek:112px; --safe-b:env(safe-area-inset-bottom,0px);
+  --radius:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:Inter,system-ui,-apple-system,sans-serif;overscroll-behavior:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+#map{position:absolute;inset:0}
+.maplibregl-ctrl-attrib{font-size:10px}
+
+/* ---------- Topbar ---------- */
+.topbar{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;
+  gap:10px;padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;
+  background:linear-gradient(180deg,rgba(13,17,23,.92),rgba(13,17,23,0));pointer-events:none}
+.topbar > *{pointer-events:auto}
+.brand{font-weight:700;font-size:15px;letter-spacing:-.01em;margin-right:auto;
+  text-shadow:0 1px 6px rgba(0,0,0,.6)}
+.brand small{display:block;font-weight:500;font-size:11px;color:var(--muted)}
+.icon-btn{width:40px;height:40px;border-radius:12px;background:rgba(22,27,34,.86);
+  border:1px solid var(--line);display:grid;place-items:center;backdrop-filter:blur(12px);
+  font-size:17px;line-height:1}
+.icon-btn:active{transform:scale(.94)}
+.cta{height:40px;padding:0 16px;border-radius:12px;background:var(--accent);color:#06121f;
+  font-weight:700;font-size:13px;border:none;box-shadow:0 4px 16px rgba(74,168,255,.3)}
+.cta:active{transform:scale(.96)}
+
+/* ---------- Bottom sheet ---------- */
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:30;background:var(--surface);
+  border-top:1px solid var(--line);border-radius:20px 20px 0 0;
+  box-shadow:0 -10px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;
+  height:78vh;transform:translateY(calc(78vh - var(--sheet-peek) - var(--safe-b)));
+  transition:transform .32s cubic-bezier(.22,1,.36,1);will-change:transform;
+  padding-bottom:var(--safe-b)}
+.sheet[data-state="half"]{transform:translateY(38vh)}
+.sheet[data-state="full"]{transform:translateY(0)}
+.sheet[data-state="hidden"]{transform:translateY(100%)}
+.grip-zone{padding:8px 0 4px;cursor:grab;touch-action:none;flex:none}
+.grip{width:38px;height:4px;border-radius:99px;background:var(--line);margin:0 auto}
+
+.sheet-head{padding:2px 16px 10px;flex:none}
+.sheet-title{font-size:15px;font-weight:700;letter-spacing:-.01em}
+.sheet-sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+.tabs{display:flex;gap:4px;padding:0 12px 10px;flex:none}
+.tab{flex:1;height:34px;border-radius:10px;font-size:13px;font-weight:600;color:var(--muted);
+  background:var(--surface-2);border:1px solid transparent}
+.tab[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);
+  border-color:rgba(74,168,255,.3)}
+.panel{display:none;overflow-y:auto;padding:0 12px 20px;flex:1;-webkit-overflow-scrolling:touch}
+.panel[data-active]{display:block}
+
+/* ---------- Karten / Listen ---------- */
+.card{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:13px 14px;margin-bottom:9px;transition:border-color .15s,background .15s}
+.card:active{background:#252d36}
+.card.selected{border-color:var(--accent);background:var(--accent-soft)}
+.card-top{display:flex;align-items:baseline;gap:8px}
+.card-name{font-size:14px;font-weight:700;letter-spacing:-.01em;flex:1}
+.card-km{font-size:13px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+.card-meta{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.pill{font-size:11px;font-weight:600;padding:3px 8px;border-radius:7px;
+  background:#0f151c;border:1px solid var(--line);color:var(--muted)}
+.pill.ok{color:var(--green);border-color:rgba(63,185,80,.3)}
+.pill.warn{color:var(--amber);border-color:rgba(210,153,34,.3)}
+.pill.hot{color:var(--accent);border-color:rgba(74,168,255,.3)}
+.card-desc{font-size:12.5px;line-height:1.5;color:var(--muted);margin-top:8px}
+.why{margin-top:9px;padding:8px 10px;border-radius:10px;background:rgba(63,185,80,.09);
+  border:1px solid rgba(63,185,80,.22);font-size:12px;line-height:1.5;color:#b9e6c1}
+.why b{color:var(--green)}
+
+.row{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:13px;
+  background:var(--surface-2);border:1px solid var(--line);margin-bottom:8px}
+.row:active{background:#252d36}
+.row-ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  font-size:16px;background:#0f151c;border:1px solid var(--line);flex:none}
+.row-main{flex:1;min-width:0}
+.row-name{font-size:13.5px;font-weight:650;letter-spacing:-.01em}
+.row-sub{font-size:11.5px;color:var(--faint);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.row-go{font-size:11px;font-weight:700;color:var(--accent);flex:none}
+
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:11px 0}
+.stat{background:#0f151c;border:1px solid var(--line);border-radius:11px;padding:9px 6px;text-align:center}
+.stat-v{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat-l{font-size:9.5px;color:var(--faint);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+
+.profile{width:100%;height:58px;display:block;margin-top:4px}
+.section-h{font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;
+  letter-spacing:.07em;margin:16px 0 8px}
+.empty{padding:26px 14px;text-align:center;color:var(--faint);font-size:12.5px;line-height:1.6}
+
+/* ---------- Wizard ---------- */
+.overlay{position:fixed;inset:0;z-index:60;background:rgba(9,12,16,.93);
+  backdrop-filter:blur(14px);display:flex;align-items:flex-end;justify-content:center}
+.overlay[hidden]{display:none}
+.wiz{width:100%;max-width:520px;max-height:92vh;background:var(--surface);
+  border:1px solid var(--line);border-radius:22px 22px 0 0;display:flex;flex-direction:column;
+  padding-bottom:var(--safe-b);animation:rise .3s cubic-bezier(.22,1,.36,1)}
+@keyframes rise{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+.wiz-head{padding:16px 18px 10px;flex:none;position:relative}
+.wiz-step-no{font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.06em;
+  text-transform:uppercase}
+.wiz-q{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:5px;line-height:1.25;
+  padding-right:34px}
+.wiz-hint{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.5}
+.wiz-x{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:9px;
+  background:var(--surface-2);display:grid;place-items:center;font-size:17px;color:var(--muted)}
+.bar{height:3px;background:var(--surface-2);margin:0 18px;border-radius:99px;overflow:hidden;flex:none}
+.bar > i{display:block;height:100%;background:var(--accent);transition:width .3s ease}
+.wiz-body{padding:14px 18px 8px;overflow-y:auto;flex:1}
+.opt{display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;
+  background:var(--surface-2);border:1.5px solid transparent;margin-bottom:8px;width:100%;text-align:left}
+.opt.on{border-color:var(--accent);background:var(--accent-soft)}
+.opt-ico{width:36px;height:36px;border-radius:11px;background:#0f151c;display:grid;
+  place-items:center;font-size:17px;flex:none;border:1px solid var(--line)}
+.opt-main{flex:1;min-width:0}
+.opt-t{font-size:14px;font-weight:650;letter-spacing:-.01em}
+.opt-d{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+.opt-check{width:21px;height:21px;border-radius:99px;border:2px solid var(--line);flex:none;
+  display:grid;place-items:center}
+.opt.on .opt-check{border-color:var(--accent);background:var(--accent)}
+.opt.on .opt-check::after{content:"";width:8px;height:8px;border-radius:99px;background:#06121f}
+.wiz-foot{display:flex;gap:9px;padding:12px 18px 16px;flex:none;border-top:1px solid var(--line)}
+.btn{height:44px;border-radius:13px;font-size:14px;font-weight:700;padding:0 18px;
+  display:grid;place-items:center}
+.btn-ghost{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.btn-main{background:var(--accent);color:#06121f;flex:1;box-shadow:0 4px 16px rgba(74,168,255,.25)}
+.btn:active{transform:scale(.97)}
+.btn[disabled]{opacity:.4;pointer-events:none}
+
+/* ---------- Bodenansicht ---------- */
+.ground{position:absolute;inset:0;z-index:40;pointer-events:none;display:flex;
+  flex-direction:column;justify-content:space-between}
+.ground[hidden]{display:none}
+.ground > *{pointer-events:auto}
+.g-top{display:flex;align-items:center;gap:9px;padding:calc(env(safe-area-inset-top,0px) + 12px) 12px 12px;
+  background:linear-gradient(180deg,rgba(9,12,16,.85),transparent)}
+.g-chip{background:rgba(22,27,34,.9);border:1px solid var(--line);border-radius:12px;
+  padding:8px 13px;backdrop-filter:blur(12px);max-width:62%}
+.g-name{font-size:13.5px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.g-dir{font-size:11px;color:var(--accent);font-weight:600;margin-top:1px}
+.g-spacer{flex:1}
+.g-bottom{padding:12px 12px calc(var(--safe-b) + 14px);
+  background:linear-gradient(0deg,rgba(9,12,16,.9),transparent);display:flex;gap:9px;align-items:flex-end}
+.g-hint{flex:1;font-size:11.5px;color:var(--muted);background:rgba(22,27,34,.82);
+  border:1px solid var(--line);border-radius:11px;padding:8px 11px;backdrop-filter:blur(10px);
+  line-height:1.45;transition:opacity .5s}
+.g-hint.fade{opacity:0}
+.compass{width:46px;height:46px;border-radius:99px;background:rgba(22,27,34,.9);
+  border:1px solid var(--line);display:grid;place-items:center;backdrop-filter:blur(12px);flex:none}
+.compass-n{font-size:10px;font-weight:800;color:var(--red);transform-origin:center}
+.photo-view{position:fixed;inset:0;z-index:70;background:#05080b;display:flex;
+  flex-direction:column;align-items:center;justify-content:center}
+.photo-view[hidden]{display:none}
+.photo-view img{max-width:100%;max-height:calc(100% - 64px);object-fit:contain}
+.photo-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;
+  padding:12px 12px calc(var(--safe-b) + 14px);background:linear-gradient(0deg,rgba(5,8,11,.95),transparent);
+  font-size:11px;color:var(--muted)}
+.photo-bar span{flex:1;line-height:1.4}
+.loading{position:absolute;inset:0;display:grid;place-items:center;z-index:50;
+  background:rgba(9,12,16,.7);backdrop-filter:blur(6px);font-size:13px;color:var(--muted)}
+.loading[hidden]{display:none}
+.spin{width:26px;height:26px;border:2.5px solid var(--line);border-top-color:var(--accent);
+  border-radius:99px;animation:sp .8s linear infinite;margin:0 auto 10px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+@media (min-width:760px){
+  .sheet{left:auto;right:16px;bottom:16px;width:392px;height:min(78vh,720px);
+    border-radius:20px;border:1px solid var(--line)}
+  .sheet[data-state="peek"]{transform:translateY(calc(100% - var(--sheet-peek)))}
+  .sheet[data-state="half"]{transform:translateY(34%)}
+  .overlay{align-items:center}
+  .wiz{border-radius:22px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
 </head>
 <body>
+<div id="map"></div>
 
-    <div id="loading">Bereite Terrain vor...</div>
-    
-    <div id="intro-overlay">
-        <div id="intro-title">BLINDSEE</div>
-        <div id="intro-subtitle">Familien-Wanderkarte Biberwier, Tirol</div>
+<header class="topbar">
+  <div class="brand">Blindsee<small id="brand-sub">Tirol · 1093 m</small></div>
+  <button class="cta" id="open-wizard">Tour finden</button>
+  <button class="icon-btn" id="btn-reset" title="Übersicht">⌂</button>
+</header>
+
+<section class="sheet" id="sheet" data-state="peek" aria-label="Tourenauswahl">
+  <div class="grip-zone" id="grip"><div class="grip"></div></div>
+  <div class="sheet-head">
+    <div class="sheet-title" id="sheet-title">Rundwege am Blindsee</div>
+    <div class="sheet-sub" id="sheet-sub">Alle Touren sind Runden — Start = Ziel</div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="routes" aria-selected="true">Runden</button>
+    <button class="tab" role="tab" data-tab="spots" aria-selected="false">Orte</button>
+    <button class="tab" role="tab" data-tab="detail" aria-selected="false">Details</button>
+  </nav>
+  <div class="panel" data-active id="panel-routes"></div>
+  <div class="panel" id="panel-spots"></div>
+  <div class="panel" id="panel-detail"></div>
+</section>
+
+<div class="overlay" id="wizard" hidden>
+  <div class="wiz">
+    <div class="wiz-head">
+      <div class="wiz-step-no" id="wiz-no">Schritt 1 von 4</div>
+      <h2 class="wiz-q" id="wiz-q"></h2>
+      <p class="wiz-hint" id="wiz-hint"></p>
+      <button class="wiz-x" id="wiz-close">×</button>
     </div>
-
-    <div id="viewer-3d"></div>
-    <div id="viewer-2d"></div>
-    
-    <!-- Mapped HTML Popups for 3D Markers -->
-    <div id="popups-container"></div>
-
-    <div id="floating-ui">
-        <button class="ui-btn" id="btn-toggle-view">🗺️ 2D Karte</button>
-        <button class="ui-btn" id="btn-hotspots">📍 Entdecken</button>
+    <div class="bar"><i id="wiz-bar" style="width:25%"></i></div>
+    <div class="wiz-body" id="wiz-body"></div>
+    <div class="wiz-foot">
+      <button class="btn btn-ghost" id="wiz-back">Zurück</button>
+      <button class="btn btn-main" id="wiz-next">Weiter</button>
     </div>
-    
-    <div id="attribution">
-        DEM: Copernicus GLO-30 | 
-        Satellit: &copy; <a href="https://www.esri.com/" target="_blank">Esri</a> World Imagery |
-        Karte: &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM</a>
+  </div>
+</div>
+
+<div class="ground" id="ground" hidden>
+  <div class="g-top">
+    <div class="g-chip">
+      <div class="g-name" id="g-name"></div>
+      <div class="g-dir" id="g-dir"></div>
     </div>
-
-    <div id="bottom-sheet">
-        <div class="sheet-handle" id="sheet-handle"></div>
-        <h2 style="margin-top:0">Interessante Punkte</h2>
-        <div id="hotspot-list"></div>
+    <div class="g-spacer"></div>
+    <button class="icon-btn" id="g-info" title="Infos">i</button>
+    <button class="icon-btn" id="g-exit" title="Zurück zur Karte">✕</button>
+  </div>
+  <div class="g-bottom">
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+      <button class="cta" id="g-photo-btn" hidden>Foto vor Ort</button>
+      <div class="g-hint" id="g-hint">Ziehen zum Umsehen · hoch/runter zum Neigen</div>
     </div>
+    <button class="compass" id="g-compass" title="Nach Norden"><span class="compass-n" id="g-needle">N</span></button>
+  </div>
+</div>
 
-    <!-- Data Injected by Build Script -->
-    <script>
-        const DEM_DATA = __DEM_DATA__;
-        const TRAILS_DATA = __TRAILS_DATA__;
-        const HOTSPOTS_DATA = __HOTSPOTS_DATA__;
-    </script>
+<div class="photo-view" id="photo-view" hidden>
+  <img id="photo-img" alt="Foto vom Ort">
+  <div class="photo-bar">
+    <span>Echtes Foto vor Ort · © Panoramax-Mitwirkende (CC-BY-SA)</span>
+    <button class="icon-btn" id="photo-close" title="Zurück zur 3D-Ansicht">✕</button>
+  </div>
+</div>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<div class="loading" id="loading" hidden><div><div class="spin"></div><span id="loading-txt">Gelände wird geladen…</span></div></div>
 
-    <!-- Application Logic -->
-    <script type="module">
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import * as TWEEN from 'tween';
+<script>
+const DATA = __DATA__;
+const ROUTES = DATA.routes, SPOTS = DATA.hotspots, LAKE = DATA.lake;
+const SPOT_BY_ID = Object.fromEntries(SPOTS.map(s => [s.id, s]));
+const CAT_ICON = {beach:"🏖", nature:"🌲", photo:"📷", map:"🧭", "360":"🔭"};
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-        // State
-        let is2D = false;
-        let map2d = null;
-        let isAnimating = true;
-        
-        // Setup Three.js
-        const container = document.getElementById('viewer-3d');
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x020205); // Dark sky start
-        scene.fog = new THREE.FogExp2(0x020205, 0.002);
-        
-        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 5000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for mobile perf
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        container.appendChild(renderer.domElement);
-        
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't go below ground
-        controls.minDistance = 20;
-        controls.maxDistance = 2000;
-        controls.enabled = false; // Disabled during intro
-        
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
-        scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffdfbb, 1.2);
-        dirLight.position.set(500, 1000, 500);
-        scene.add(dirLight);
-        
-        // Terrain Generation
-        const widthSegments = DEM_DATA.width - 1;
-        const heightSegments = DEM_DATA.height - 1;
-        const scaleX = 4000 * (DEM_DATA.bounds.lon_max - DEM_DATA.bounds.lon_min);
-        const scaleY = 4000 * (DEM_DATA.bounds.lat_max - DEM_DATA.bounds.lat_min);
-        
-        const geometry = new THREE.PlaneGeometry(scaleX, scaleY, widthSegments, heightSegments);
-        geometry.rotateX(-Math.PI / 2);
-        
-        const positions = geometry.attributes.position.array;
-        let minH = Infinity, maxH = -Infinity;
-        for(let i=0; i<DEM_DATA.data.length; i++) {
-            if(DEM_DATA.data[i] < minH) minH = DEM_DATA.data[i];
-            if(DEM_DATA.data[i] > maxH) maxH = DEM_DATA.data[i];
-        }
-        
-        // Normalize height and apply
-        const heightScale = 0.5; // exaggeration
-        for(let i=0; i<DEM_DATA.data.length; i++) {
-            const h = (DEM_DATA.data[i] - minH) * heightScale;
-            positions[i*3 + 1] = h;
-        }
-        geometry.computeVertexNormals();
-        
-        // Texture: Esri World Imagery (Publicly usable for visualization)
-        const textureLoader = new THREE.TextureLoader();
-        // Calculate the bounding box for Esri REST export
-        const esriBbox = `${DEM_DATA.bounds.lon_min},${DEM_DATA.bounds.lat_min},${DEM_DATA.bounds.lon_max},${DEM_DATA.bounds.lat_max}`;
-        const esriUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${esriBbox}&bboxSR=4326&imageSR=4326&size=1024,1024&format=jpg&f=image`;
-        
-        const material = new THREE.MeshLambertMaterial({ 
-            color: 0x555555, 
-            wireframe: false,
-            transparent: true,
-            opacity: 0 // Fade in later
-        });
-        
-        const terrain = new THREE.Mesh(geometry, material);
-        scene.add(terrain);
-        
-        // Load Texture asynchronously
-        textureLoader.load(esriUrl, (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            material.map = tex;
-            material.color.setHex(0xffffff); // reset base color when texture loads
-            material.needsUpdate = true;
-        });
+/* ============================ Karte ============================ */
+const map = new maplibregl.Map({
+  container:"map", attributionControl:true, maxPitch:85, hash:false,
+  center:LAKE.center, zoom:14.2, pitch:48, bearing:-18, maxZoom:20.5,
+  style:{
+    version:8,
+    glyphs:"https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    sources:{
+      sat:{type:"raster", tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize:256, maxzoom:19,
+        attribution:"Luftbild © Esri, Maxar, Earthstar Geographics · Wege © OpenStreetMap-Mitwirkende · Höhen © Mapzen/AWS"},
+      dem:{type:"raster-dem", tiles:["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+        tileSize:256, maxzoom:15, encoding:"terrarium"}
+    },
+    layers:[
+      {id:"bg", type:"background", paint:{"background-color":"#0d1117"}},
+      {id:"sat", type:"raster", source:"sat"}
+    ],
+    terrain:{source:"dem", exaggeration:1.0}
+  }
+});
+map.addControl(new maplibregl.NavigationControl({visualizePitch:true}), "bottom-left");
+map.touchZoomRotate.enableRotation();
 
-        // Helpers
-        function latLonToWorld(lat, lon, heightOffset = 2) {
-            const bx = DEM_DATA.bounds.lon_min, bx2 = DEM_DATA.bounds.lon_max;
-            const by = DEM_DATA.bounds.lat_min, by2 = DEM_DATA.bounds.lat_max;
-            
-            const px = (lon - bx) / (bx2 - bx);
-            const py = 1.0 - (lat - by) / (by2 - by);
-            
-            const x = (px - 0.5) * scaleX;
-            const z = (py - 0.5) * scaleY;
-            
-            // Interpolate height (simple nearest)
-            const ix = Math.max(0, Math.min(widthSegments, Math.round(px * widthSegments)));
-            const iy = Math.max(0, Math.min(heightSegments, Math.round(py * heightSegments)));
-            const idx = iy * DEM_DATA.width + ix;
-            const h = (DEM_DATA.data[idx] - minH) * heightScale;
-            
-            return new THREE.Vector3(x, h + heightOffset, z);
-        }
+let activeRoute = null, activeSpot = null;
 
-        // Draw Trails
-        const trailsGroup = new THREE.Group();
-        trailsGroup.visible = false;
-        scene.add(trailsGroup);
-        
-        const lineMatStroller = new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 3 });
-        const lineMatNormal = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2, transparent: true, opacity: 0.7 });
-        
-        TRAILS_DATA.forEach(t => {
-            const pts = t.coords.map(c => latLonToWorld(c[0], c[1], 1));
-            const geom = new THREE.BufferGeometry().setFromPoints(pts);
-            const line = new THREE.Line(geom, t.stroller ? lineMatStroller : lineMatNormal);
-            trailsGroup.add(line);
-        });
+map.on("load", () => {
+  // Himmel + Dunst: erst dadurch entsteht in der Bodenansicht ein echter
+  // Horizont statt einer abgeschnittenen Gelaendekante.
+  if (map.setSky) map.setSky({
+    "sky-color":"#7fb2e5", "horizon-color":"#dbe8f4", "fog-color":"#c4d6e6",
+    "sky-horizon-blend":.65, "horizon-fog-blend":.55, "fog-ground-blend":.3
+  });
+  map.addSource("route", {type:"geojson", data:emptyFC()});
+  map.addLayer({id:"route-glow", type:"line", source:"route",
+    layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-color":"#4aa8ff","line-width":11,"line-opacity":.22,"line-blur":5}});
+  map.addLayer({id:"route-line", type:"line", source:"route",
+    layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-color":"#4aa8ff","line-width":4}});
+  map.addLayer({id:"route-dash", type:"line", source:"route",
+    layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-color":"#eaf4ff","line-width":1.6,"line-dasharray":[1.5,2.5],"line-opacity":.75}});
 
-        // Hotspots (Markers & HTML Popups)
-        const hotspotsGroup = new THREE.Group();
-        hotspotsGroup.visible = false;
-        scene.add(hotspotsGroup);
-        
-        const popupsContainer = document.getElementById('popups-container');
-        const markerObjects = [];
+  renderRoutes(); renderSpots(); addSpotMarkers();
+  selectRoute(ROUTES.find(r => r.id === "see") || ROUTES[0], {fly:true});
+});
 
-        HOTSPOTS_DATA.forEach((hs, index) => {
-            const pos = latLonToWorld(hs.lat, hs.lon, 5);
-            
-            // 3D Marker
-            let color = 0x4ade80; // green
-            if(hs.kid_suitability === 'yellow') color = 0xfacc15;
-            if(hs.kid_suitability === 'red') color = 0xf87171;
-            
-            const mGeom = new THREE.SphereGeometry(3, 16, 16);
-            const mMat = new THREE.MeshBasicMaterial({ color: color });
-            const marker = new THREE.Mesh(mGeom, mMat);
-            marker.position.copy(pos);
-            marker.userData = { id: hs.id, index: index, data: hs };
-            hotspotsGroup.add(marker);
-            
-            // Outer Ring
-            const rGeom = new THREE.RingGeometry(4, 5, 32);
-            const rMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-            const ring = new THREE.Mesh(rGeom, rMat);
-            ring.rotation.x = Math.PI/2;
-            marker.add(ring);
-            
-            // HTML Popup
-            const popup = document.createElement('div');
-            popup.className = 'html-popup';
-            popup.id = `popup-${hs.id}`;
-            popup.innerHTML = `<strong>${hs.name}</strong><br><span style="font-size:11px;color:#ccc;">Klick für Details</span>`;
-            popupsContainer.appendChild(popup);
-            
-            markerObjects.push({ mesh: marker, ring: ring, popup: popup, pos: pos, data: hs });
-        });
+function emptyFC(){ return {type:"FeatureCollection", features:[]}; }
 
-        // Intro Animation Sequence (Google Earth Fly-In)
-        document.getElementById('loading').style.display = 'none';
-        
-        // Initial state
-        camera.position.set(0, 3000, 3000);
-        controls.target.set(0, 0, 0);
-        
-        // Step 1: Text fade in
-        setTimeout(() => {
-            document.getElementById('intro-title').style.opacity = 1;
-            document.getElementById('intro-subtitle').style.opacity = 1;
-        }, 500);
+/* ============================ Marker ============================ */
+function addSpotMarkers(){
+  SPOTS.forEach(s => {
+    const el = document.createElement("button");
+    el.style.cssText = "width:30px;height:30px;border-radius:99px;background:rgba(22,27,34,.94);"+
+      "border:2px solid #4aa8ff;display:grid;place-items:center;font-size:14px;cursor:pointer;"+
+      "box-shadow:0 3px 10px rgba(0,0,0,.5)";
+    el.textContent = CAT_ICON[s.category] || "📍";
+    el.setAttribute("aria-label", s.name);
+    el.addEventListener("click", ev => { ev.stopPropagation(); openSpot(s); });
+    new maplibregl.Marker({element:el, anchor:"center"}).setLngLat([s.lon, s.lat]).addTo(map);
+    s._el = el;
+  });
+}
 
-        // Step 2: 2s Atmospheric Glow
-        setTimeout(() => {
-            new TWEEN.Tween(scene.fog)
-                .to({ density: 0.001, color: { r: 0.53, g: 0.81, b: 0.92 } }, 2000)
-                .start();
-            new TWEEN.Tween(scene.background)
-                .to({ r: 0.53, g: 0.81, b: 0.92 }, 2000)
-                .start();
-        }, 2000);
-        
-        // Step 3: 6s Terrain Fade In
-        setTimeout(() => {
-            new TWEEN.Tween(material)
-                .to({ opacity: 1 }, 2000)
-                .start();
-        }, 4000);
+function highlightSpots(ids){
+  const set = new Set(ids || []);
+  SPOTS.forEach(s => {
+    if (!s._el) return;
+    const on = set.size === 0 || set.has(s.id);
+    s._el.style.opacity = on ? "1" : ".32";
+    s._el.style.borderColor = set.has(s.id) ? "#4aa8ff" : "#2b333d";
+  });
+}
 
-        // Step 4: 8s Fly to start
-        setTimeout(() => {
-            document.getElementById('intro-overlay').style.opacity = 0;
-            
-            const startPos = latLonToWorld(HOTSPOTS_DATA[0].lat, HOTSPOTS_DATA[0].lon, 0);
-            
-            // Camera flight
-            new TWEEN.Tween(camera.position)
-                .to({ x: startPos.x, y: 150, z: startPos.z + 200 }, 4000)
-                .easing(TWEEN.Easing.Cubic.InOut)
-                .start();
-                
-            new TWEEN.Tween(controls.target)
-                .to({ x: startPos.x, y: startPos.y, z: startPos.z }, 4000)
-                .easing(TWEEN.Easing.Cubic.InOut)
-                .onComplete(() => {
-                    controls.enabled = true;
-                    isAnimating = false;
-                    trailsGroup.visible = true;
-                    hotspotsGroup.visible = true;
-                    buildHotspotList();
-                })
-                .start();
-        }, 6000);
+/* ============================ Runden ============================ */
+function routePills(r){
+  const p = [];
+  p.push(`<span class="pill">${r.ascent_m} Hm</span>`);
+  p.push(`<span class="pill">${r.duration}</span>`);
+  p.push(`<span class="pill ${r.difficulty === "Leicht" ? "ok" : r.difficulty === "Sportlich" ? "warn" : ""}">${r.difficulty}</span>`);
+  if (r.stroller_ok) p.push(`<span class="pill ok">Kinderwagen</span>`);
+  if (r.lake_share >= .5) p.push(`<span class="pill hot">${Math.round(r.lake_share*100)} % am Wasser</span>`);
+  if (r.shade_share >= .35) p.push(`<span class="pill ok">${Math.round(r.shade_share*100)} % Schatten</span>`);
+  if (r.hotspots.length) p.push(`<span class="pill">${r.hotspots.length} Orte</span>`);
+  return p.join("");
+}
 
-        // Animation Loop
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-        
-        function animate(time) {
-            requestAnimationFrame(animate);
-            TWEEN.update(time);
-            
-            if(!isAnimating && !is2D && !controls.state) {
-                // Auto rotation when idle
-                controls.autoRotate = true;
-                controls.autoRotateSpeed = 0.5;
-            } else {
-                controls.autoRotate = false;
-            }
-            
-            controls.update();
-            
-            // Update Hotspot Popups
-            if(!isAnimating && hotspotsGroup.visible) {
-                markerObjects.forEach(m => {
-                    // Ring animation
-                    const scale = 1 + Math.sin(time * 0.003 + m.mesh.position.x) * 0.2;
-                    m.ring.scale.set(scale, scale, scale);
-                    
-                    // HTML popup projection
-                    const vector = m.pos.clone().project(camera);
-                    if(vector.z < 1) { // in front of camera
-                        const x = (vector.x * .5 + .5) * window.innerWidth;
-                        const y = (-(vector.y * .5) + .5) * window.innerHeight;
-                        m.popup.style.left = `${x}px`;
-                        m.popup.style.top = `${y}px`;
-                        m.popup.classList.add('visible');
-                    } else {
-                        m.popup.classList.remove('visible');
-                    }
-                });
-            } else {
-                markerObjects.forEach(m => m.popup.classList.remove('visible'));
-            }
-            
-            renderer.render(scene, camera);
-        }
-        animate();
+function renderRoutes(list, reasons){
+  const rs = list || ROUTES;
+  const el = document.getElementById("panel-routes");
+  if (!rs.length){ el.innerHTML = `<div class="empty">Keine Runde passt zu dieser Auswahl.</div>`; return; }
+  el.innerHTML = rs.map((r, i) => `
+    <div class="card ${activeRoute && r.id === activeRoute.id ? "selected" : ""}" data-route="${r.id}">
+      <div class="card-top">
+        <span class="card-name">${reasons && i === 0 ? "★ " : ""}${r.name}</span>
+        <span class="card-km">${r.km.toFixed(2).replace(".", ",")} km</span>
+      </div>
+      <div class="card-meta">${routePills(r)}</div>
+      <div class="card-desc">${r.desc}</div>
+      ${reasons && reasons[r.id] ? `<div class="why">${reasons[r.id]}</div>` : ""}
+    </div>`).join("");
+  el.querySelectorAll("[data-route]").forEach(c =>
+    c.addEventListener("click", () => selectRoute(ROUTES.find(r => r.id === c.dataset.route), {fly:true})));
+}
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            if(map2d) map2d.invalidateSize();
-        });
+function selectRoute(r, opt){
+  if (!r) return;
+  activeRoute = r;
+  const src = map.getSource("route");
+  if (src) src.setData({type:"Feature", geometry:{type:"LineString", coordinates:r.coords}, properties:{}});
+  highlightSpots(r.hotspots);
+  document.getElementById("sheet-title").textContent = r.name;
+  document.getElementById("sheet-sub").textContent =
+    `${r.km.toFixed(2).replace(".", ",")} km Runde · ${r.ascent_m} Hm · ${r.duration}`;
+  renderRoutes(); renderDetail(r);
+  if (opt && opt.fly){
+    const b = new maplibregl.LngLatBounds();
+    r.coords.forEach(c => b.extend(c));
+    map.fitBounds(b, {padding:{top:90, bottom:window.innerHeight*0.42, left:50, right:50},
+      pitch:46, bearing:-18, duration:reduceMotion ? 0 : 1300});
+  }
+}
 
-        // Interaction (Raycasting)
-        window.addEventListener('pointerdown', (e) => {
-            if(is2D || isAnimating) return;
-            
-            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-            
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(hotspotsGroup.children);
-            
-            if(intersects.length > 0) {
-                const marker = intersects[0].object;
-                if(marker.userData.id) {
-                    flyToHotspot(marker.userData.data);
-                    openBottomSheet(marker.userData.data);
-                }
-            }
-        });
+/* ============================ Details ============================ */
+function renderDetail(r){
+  const el = document.getElementById("panel-detail");
+  if (!r){ el.innerHTML = `<div class="empty">Wähle eine Runde.</div>`; return; }
+  const spots = r.hotspots.map(id => SPOT_BY_ID[id]).filter(Boolean);
+  el.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-v">${r.km.toFixed(1).replace(".", ",")}</div><div class="stat-l">km</div></div>
+      <div class="stat"><div class="stat-v">${r.ascent_m}</div><div class="stat-l">Höhenm.</div></div>
+      <div class="stat"><div class="stat-v">${r.minutes}</div><div class="stat-l">Minuten</div></div>
+      <div class="stat"><div class="stat-v">${r.max_slope_pct.toFixed(0)}%</div><div class="stat-l">max. Steig.</div></div>
+    </div>
+    <div class="section-h">Höhenprofil</div>
+    <svg class="profile" id="prof" viewBox="0 0 300 58" preserveAspectRatio="none"></svg>
+    <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:2px">
+      <span>${r.lowpoint_m} m</span><span>${r.highpoint_m} m</span>
+    </div>
+    <div class="section-h">Beschaffenheit</div>
+    <div class="card-meta">${routePills(r)}</div>
+    <div class="card-desc">${r.desc}</div>
+    <div class="section-h">Orte auf dieser Runde (${spots.length})</div>
+    ${spots.length ? spots.map(s => `
+      <div class="row" data-spot="${s.id}">
+        <div class="row-ico">${CAT_ICON[s.category] || "📍"}</div>
+        <div class="row-main"><div class="row-name">${s.name}</div>
+          <div class="row-sub">${r.hotspot_detours[s.id]} m vom Weg · ${s.duration}</div></div>
+        <div class="row-go">ANSEHEN</div>
+      </div>`).join("")
+      : `<div class="empty">Auf dieser Runde liegen keine der markierten Orte.</div>`}`;
+  drawProfile(r);
+  el.querySelectorAll("[data-spot]").forEach(row =>
+    row.addEventListener("click", () => openSpot(SPOT_BY_ID[row.dataset.spot])));
+}
 
-        function flyToHotspot(data) {
-            isAnimating = true;
-            controls.enabled = false;
-            
-            const targetPos = latLonToWorld(data.lat, data.lon, 0);
-            
-            // Fly Camera
-            new TWEEN.Tween(camera.position)
-                .to({ x: targetPos.x, y: 100, z: targetPos.z + 150 }, 1500)
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .start();
-                
-            new TWEEN.Tween(controls.target)
-                .to({ x: targetPos.x, y: targetPos.y, z: targetPos.z }, 1500)
-                .easing(TWEEN.Easing.Quadratic.InOut)
-                .onComplete(() => {
-                    controls.enabled = true;
-                    isAnimating = false;
-                })
-                .start();
-        }
+function drawProfile(r){
+  const svg = document.getElementById("prof");
+  if (!svg || !r.profile || r.profile.length < 2) return;
+  const zs = r.profile, lo = Math.min(...zs), hi = Math.max(...zs), span = Math.max(1, hi - lo);
+  const pts = zs.map((z, i) => [i / (zs.length - 1) * 300, 54 - (z - lo) / span * 44]);
+  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  svg.innerHTML =
+    `<path d="${d} L300 58 L0 58 Z" fill="rgba(74,168,255,.16)"/>` +
+    `<path d="${d}" fill="none" stroke="#4aa8ff" stroke-width="1.6" stroke-linejoin="round"/>`;
+}
 
-        // 2D Map (Leaflet)
-        const btnToggle = document.getElementById('btn-toggle-view');
-        btnToggle.addEventListener('click', () => {
-            is2D = !is2D;
-            const v2d = document.getElementById('viewer-2d');
-            
-            if(is2D) {
-                v2d.classList.add('active');
-                btnToggle.classList.add('active');
-                btnToggle.innerHTML = "🏔️ 3D Ansicht";
-                
-                if(!map2d) {
-                    map2d = L.map('viewer-2d').setView([HOTSPOTS_DATA[0].lat, HOTSPOTS_DATA[0].lon], 15);
-                    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        maxZoom: 19,
-                        attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    }).addTo(map2d);
-                    
-                    // Draw trails
-                    TRAILS_DATA.forEach(t => {
-                        L.polyline(t.coords, {
-                            color: t.stroller ? '#ff00ff' : '#0078D7',
-                            weight: t.stroller ? 4 : 2
-                        }).addTo(map2d);
-                    });
-                    
-                    // Draw Hotspots
-                    HOTSPOTS_DATA.forEach(hs => {
-                        let col = hs.kid_suitability === 'green' ? 'green' : (hs.kid_suitability === 'yellow' ? 'gold' : 'red');
-                        const marker = L.circleMarker([hs.lat, hs.lon], {
-                            radius: 8, fillColor: col, color: '#fff', weight: 2, fillOpacity: 1
-                        }).addTo(map2d);
-                        marker.bindPopup(`<b>${hs.name}</b><br>${hs.desc}`);
-                    });
-                }
-            } else {
-                v2d.classList.remove('active');
-                btnToggle.classList.remove('active');
-                btnToggle.innerHTML = "🗺️ 2D Karte";
-            }
-        });
+/* ============================ Orte ============================ */
+function renderSpots(){
+  document.getElementById("panel-spots").innerHTML = SPOTS.map(s => `
+    <div class="row" data-spot="${s.id}">
+      <div class="row-ico">${CAT_ICON[s.category] || "📍"}</div>
+      <div class="row-main"><div class="row-name">${s.name}</div>
+        <div class="row-sub">${s.duration} · ${s.infrastructure || ""}</div></div>
+      <div class="row-go">ANSEHEN</div>
+    </div>`).join("");
+  document.getElementById("panel-spots").querySelectorAll("[data-spot]").forEach(row =>
+    row.addEventListener("click", () => openSpot(SPOT_BY_ID[row.dataset.spot])));
+}
 
-        // Bottom Sheet Logic
-        const sheet = document.getElementById('bottom-sheet');
-        const sheetHandle = document.getElementById('sheet-handle');
-        const hotspotList = document.getElementById('hotspot-list');
-        const btnHotspots = document.getElementById('btn-hotspots');
-        
-        let sheetOpen = false;
-        
-        function toggleSheet() {
-            sheetOpen = !sheetOpen;
-            sheet.classList.toggle('open', sheetOpen);
-            btnHotspots.classList.toggle('active', sheetOpen);
-        }
-        
-        btnHotspots.addEventListener('click', toggleSheet);
-        sheetHandle.addEventListener('click', toggleSheet);
-        
-        function getBadge(suit) {
-            if(suit === 'green') return '<span class="badge green">✅ Gut geeignet</span>';
-            if(suit === 'yellow') return '<span class="badge yellow">⚠️ Bedingt</span>';
-            if(suit === 'red') return '<span class="badge red">❌ Ungeeignet</span>';
-            return '';
-        }
+function openSpot(s){
+  if (!s) return;
+  activeSpot = s;
+  showTab("detail");
+  document.getElementById("panel-detail").innerHTML = `
+    <div class="card selected">
+      <div class="card-top"><span class="card-name">${s.name}</span></div>
+      <div class="card-meta">
+        <span class="pill hot">${s.duration}</span>
+        <span class="pill ${s.kid_suitability === "green" ? "ok" : "warn"}">
+          ${s.kid_suitability === "green" ? "kinderfreundlich" : "Vorsicht mit Kindern"}</span>
+      </div>
+      <div class="card-desc">${s.desc}</div>
+    </div>
+    <button class="btn btn-main" id="enter-ground" style="width:100%;margin:4px 0 12px">
+      Vor Ort umsehen (3D)</button>
+    <div class="section-h">Vor Ort</div>
+    ${[["Infrastruktur", s.infrastructure], ["Öffnungszeiten", s.opening_hours],
+       ["Kosten", s.fees], ["Regeln", s.rules]].filter(x => x[1]).map(x => `
+      <div class="row"><div class="row-main">
+        <div class="row-sub" style="color:var(--faint)">${x[0]}</div>
+        <div class="row-name" style="font-weight:500;font-size:12.5px;white-space:normal;line-height:1.5;margin-top:3px">${x[1]}</div>
+      </div></div>`).join("")}
+    <button class="btn btn-ghost" id="back-route" style="width:100%;margin-top:10px">
+      ← Zurück zur Runde</button>`;
+  document.getElementById("sheet-title").textContent = s.name;
+  document.getElementById("sheet-sub").textContent = "Ort am Blindsee";
+  document.getElementById("enter-ground").addEventListener("click", () => enterGround(s));
+  document.getElementById("back-route").addEventListener("click", () => {
+    activeSpot = null; showTab("routes"); selectRoute(activeRoute, {fly:true});
+  });
+  setSheet("half");
+  map.flyTo({center:[s.lon, s.lat], zoom:16.6, pitch:60, bearing:s.bearing || 0,
+    duration:reduceMotion ? 0 : 1400});
+}
 
-        function buildHotspotList() {
-            hotspotList.innerHTML = '';
-            HOTSPOTS_DATA.forEach(hs => {
-                const card = document.createElement('div');
-                card.className = 'hotspot-card';
-                card.innerHTML = `
-                    <div class="hotspot-title">${hs.name} ${getBadge(hs.kid_suitability)}</div>
-                    <div class="hotspot-desc">${hs.desc}</div>
-                    <div class="hotspot-meta"><span>📍 Start: ~0.5 km</span> <span>Quelle: ${hs.source}</span></div>
-                `;
-                card.addEventListener('click', () => {
-                    flyToHotspot(hs);
-                    if(is2D && map2d) map2d.flyTo([hs.lat, hs.lon], 17);
-                    if(window.innerWidth < 768) toggleSheet(); // auto-close on mobile
-                });
-                hotspotList.appendChild(card);
-            });
-        }
-        
-        function openBottomSheet(data) {
-            // Reorder list to put selected first or just open it
-            if(!sheetOpen) toggleSheet();
-        }
-    </script>
+/* =================== Bodenansicht (Vor-Ort-Perspektive) =================== */
+/* MapLibre kann die Kamera nicht frei setzen - sie haengt immer am Kartenmittel-
+   punkt. Um trotzdem AM Ort zu stehen statt schraeg darueber zu schweben, wird
+   der Mittelpunkt genau so weit in Blickrichtung vorverlegt, wie die Kamera bei
+   gegebener Neigung dahinter liegt. Die Distanz wird aus Blickfeld, Canvas-Hoehe
+   und Zoom gerechnet, nicht geraten. */
+const G_PITCH_MAX = 87, G_PITCH_MIN = 55;
+let groundOn = false, gSpot = null, gLon = 0, gLat = 0,
+    gBear = 0, gPitch = 87, gZoom = 19.2, gGround = 1100;
+
+function terrainAt(lon, lat, fallback){
+  try {
+    const z = map.queryTerrainElevation({lng:lon, lat:lat});
+    return (z === null || z === undefined || !isFinite(z)) ? fallback : z;
+  } catch(e){ return fallback; }
+}
+
+/* Abstand Kamera <-> Kartenmittelpunkt in Metern */
+function cameraDistanceM(){
+  const fovDeg = map.getVerticalFieldOfView ? map.getVerticalFieldOfView() : 36.87;
+  const fov = fovDeg * Math.PI / 180;
+  const h = map.getCanvas().clientHeight || 700;
+  const px = 0.5 * h / Math.tan(fov / 2);
+  const mpp = 156543.03392 * Math.cos(gLat * Math.PI / 180) / Math.pow(2, gZoom);
+  return px * mpp;
+}
+
+function applyGroundCamera(){
+  const dist = cameraDistanceM();
+  const ahead = dist * Math.sin(gPitch * Math.PI / 180);   // Versatz am Boden
+  const rad = gBear * Math.PI / 180;
+  const cLat = gLat + (ahead * Math.cos(rad)) / 110540;
+  const cLon = gLon + (ahead * Math.sin(rad)) / (111320 * Math.cos(gLat * Math.PI / 180));
+  map.jumpTo({center:[cLon, cLat], zoom:gZoom, pitch:gPitch, bearing:gBear});
+  document.getElementById("g-needle").style.transform = `rotate(${-gBear}deg)`;
+  const above = dist * Math.cos(gPitch * Math.PI / 180);
+  document.getElementById("g-dir").textContent =
+    `Blick nach ${compassName(gBear)} · ${Math.round(gGround)} m ü. NN · ca. ${Math.round(above)} m über Grund`;
+}
+
+async function enterGround(s){
+  gSpot = s; gLon = s.lon; gLat = s.lat; gBear = s.bearing || 0;
+  gPitch = G_PITCH_MAX; gZoom = 19.2;
+  const load = document.getElementById("loading");
+  document.getElementById("loading-txt").textContent = "Gelände wird geladen…";
+  load.hidden = false;
+
+  map.easeTo({center:[gLon, gLat], zoom:17.4, pitch:66, bearing:gBear,
+    duration:reduceMotion ? 0 : 1400, essential:true});
+  await once(map, "moveend");
+  await tilesReady(3000);
+
+  gGround = terrainAt(gLon, gLat, 1100);
+  groundOn = true;
+  map.dragPan.disable(); map.dragRotate.disable(); map.scrollZoom.disable();
+  map.touchZoomRotate.disable(); map.keyboard.disable(); map.doubleClickZoom.disable();
+  applyGroundCamera();
+  await tilesReady(2500);
+
+  load.hidden = true;
+  document.getElementById("ground").hidden = false;
+  document.getElementById("g-name").textContent = s.name;
+  setSheet("hidden");
+  const hint = document.getElementById("g-hint");
+  hint.classList.remove("fade");
+  setTimeout(() => hint.classList.add("fade"), 4500);
+
+  lookForPhoto(s);
+}
+
+function exitGround(){
+  groundOn = false;
+  closePhoto();
+  document.getElementById("ground").hidden = true;
+  document.getElementById("g-photo-btn").hidden = true;
+  map.dragPan.enable(); map.dragRotate.enable(); map.scrollZoom.enable();
+  map.touchZoomRotate.enable(); map.keyboard.enable(); map.doubleClickZoom.enable();
+  map.easeTo({center:[gLon, gLat], zoom:15.6, pitch:50,
+    duration:reduceMotion ? 0 : 1200});
+  setSheet("half");
+}
+
+function compassName(b){
+  const n = ["Norden","Nordosten","Osten","Südosten","Süden","Südwesten","Westen","Nordwesten"];
+  return n[Math.round(((b % 360) + 360) % 360 / 45) % 8];
+}
+function once(target, ev){ return new Promise(res => target.once(ev, res)); }
+function tilesReady(maxMs){
+  return new Promise(res => {
+    const t0 = Date.now();
+    (function check(){
+      if (map.areTilesLoaded() || Date.now() - t0 > maxMs) return res();
+      setTimeout(check, 120);
+    })();
+  });
+}
+
+/* Umsehen per Drag - eigene Steuerung, da die Standardhandler abgeschaltet sind */
+(function lookAround(){
+  const el = map.getCanvas();
+  let drag = false, lx = 0, ly = 0;
+  const pos = e => e.touches && e.touches[0]
+    ? {x:e.touches[0].clientX, y:e.touches[0].clientY}
+    : {x:e.clientX, y:e.clientY};
+  const start = e => { if (!groundOn) return; const p = pos(e); drag = true; lx = p.x; ly = p.y; };
+  const move = e => {
+    if (!groundOn || !drag) return;
+    const p = pos(e);
+    gBear = ((gBear + (lx - p.x) * 0.24) % 360 + 360) % 360;
+    gPitch = Math.max(G_PITCH_MIN, Math.min(G_PITCH_MAX, gPitch + (p.y - ly) * 0.10));
+    lx = p.x; ly = p.y;
+    applyGroundCamera();
+    if (e.cancelable) e.preventDefault();
+  };
+  const end = () => { drag = false; };
+  el.addEventListener("mousedown", start);
+  el.addEventListener("touchstart", start, {passive:true});
+  window.addEventListener("mousemove", move);
+  el.addEventListener("touchmove", move, {passive:false});
+  window.addEventListener("mouseup", end);
+  el.addEventListener("touchend", end);
+})();
+
+/* ---- Echtes Vor-Ort-Foto (Panoramax, offen und ohne Schluessel) ---- */
+let photoUrl = null;
+async function lookForPhoto(s){
+  const btn = document.getElementById("g-photo-btn");
+  btn.hidden = true; photoUrl = null;
+  const d = 0.004;
+  const bbox = [s.lon - d, s.lat - d, s.lon + d, s.lat + d].join(",");
+  try {
+    const r = await fetch(`https://api.panoramax.xyz/api/search?bbox=${bbox}&limit=200`);
+    if (!r.ok) return;
+    const j = await r.json();
+    let best = null, bestD = Infinity;
+    for (const f of (j.features || [])){
+      const c = f.geometry && f.geometry.coordinates;
+      if (!c) continue;
+      const dx = (c[0] - s.lon) * 111320 * Math.cos(s.lat * Math.PI / 180);
+      const dy = (c[1] - s.lat) * 110540;
+      const dist = Math.hypot(dx, dy);
+      if (dist < bestD){ bestD = dist; best = f; }
+    }
+    if (!best || bestD > 150) return;   // weiter weg zeigt einen anderen Ort
+    const asset = best.assets && (best.assets.hd || best.assets.sd || best.assets.thumb);
+    if (!asset || !asset.href) return;
+    photoUrl = asset.href;
+    btn.hidden = false;
+    btn.textContent = `Foto vor Ort (${Math.round(bestD)} m)`;
+  } catch(e){ /* offline oder Dienst weg: 3D-Ansicht bleibt nutzbar */ }
+}
+
+function openPhoto(){
+  if (!photoUrl) return;
+  const v = document.getElementById("photo-view");
+  document.getElementById("photo-img").src = photoUrl;
+  v.hidden = false;
+}
+function closePhoto(){ document.getElementById("photo-view").hidden = true; }
+
+document.getElementById("g-exit").addEventListener("click", exitGround);
+document.getElementById("g-info").addEventListener("click", () => {
+  setSheet(document.getElementById("sheet").dataset.state === "hidden" ? "half" : "hidden");
+});
+document.getElementById("g-compass").addEventListener("click", () => {
+  gBear = 0; applyGroundCamera();
+});
+document.getElementById("g-photo-btn").addEventListener("click", openPhoto);
+document.getElementById("photo-close").addEventListener("click", closePhoto);
+
+/* ============================ Sheet & Tabs ============================ */
+const sheet = document.getElementById("sheet");
+function setSheet(state){ sheet.dataset.state = state; }
+function showTab(name){
+  document.querySelectorAll(".tab").forEach(t =>
+    t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+  document.querySelectorAll(".panel").forEach(p =>
+    p.id === "panel-" + name ? p.setAttribute("data-active", "") : p.removeAttribute("data-active"));
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  showTab(t.dataset.tab);
+  if (sheet.dataset.state === "peek") setSheet("half");
+}));
+
+(function dragSheet(){
+  const grip = document.getElementById("grip");
+  let y0 = 0, dragging = false;
+  const order = ["peek", "half", "full"];
+  const start = e => { dragging = true; y0 = (e.touches ? e.touches[0].clientY : e.clientY); };
+  const end = e => {
+    if (!dragging) return;
+    dragging = false;
+    const y1 = (e.changedTouches ? e.changedTouches[0].clientY : e.clientY);
+    const dy = y1 - y0;
+    let i = order.indexOf(sheet.dataset.state);
+    if (i < 0) i = 0;
+    if (dy < -40) i = Math.min(order.length - 1, i + 1);
+    else if (dy > 40) i = Math.max(0, i - 1);
+    else i = sheet.dataset.state === "full" ? 1 : (i === 0 ? 1 : i);
+    setSheet(order[i]);
+  };
+  grip.addEventListener("touchstart", start, {passive:true});
+  grip.addEventListener("touchend", end);
+  grip.addEventListener("mousedown", start);
+  window.addEventListener("mouseup", e => { if (dragging) end(e); });
+})();
+
+document.getElementById("btn-reset").addEventListener("click", () => {
+  if (groundOn) exitGround();
+  activeSpot = null; showTab("routes"); setSheet("half");
+  selectRoute(activeRoute || ROUTES[0], {fly:true});
+});
+
+/* ============================ Tour-Assistent ============================ */
+const QUESTIONS = [
+  {
+    key:"size", q:"Wie groß soll die Runde sein?",
+    hint:"Jede Tour ist ein geschlossener Rundweg — du kommst dort an, wo du gestartet bist. Nur die Größe unterscheidet sich.",
+    multi:false,
+    options:[
+      {v:"mini",  t:"Kleine Runde",    d:"rund 1,5 km · etwa 25 Minuten",  i:"🚶"},
+      {v:"kurz",  t:"Kurze Runde",     d:"rund 2 km · etwa 40 Minuten",    i:"🥾"},
+      {v:"see",   t:"Einmal um den See", d:"rund 3,5 km · etwa 1 Stunde",  i:"🌊"},
+      {v:"gross", t:"Große Runde",     d:"rund 6 km · etwa 2 Stunden",     i:"⛰"},
+      {v:"pano",  t:"Panorama-Runde",  d:"rund 8 km · etwa 3 Stunden",     i:"🏔"}
+    ]
+  },
+  {
+    key:"who", q:"Wer ist dabei?",
+    hint:"Das entscheidet, welche Wege überhaupt in Frage kommen — Belag, Treppen und Steigung.",
+    multi:false,
+    options:[
+      {v:"stroller", t:"Mit Kinderwagen",   d:"nur befestigte Wege ohne Stufen", i:"👶"},
+      {v:"kids",     t:"Mit kleinen Kindern", d:"kurz, flach, viel zu entdecken", i:"🧒"},
+      {v:"dog",      t:"Mit Hund",          d:"schattig und mit Wasserzugang",   i:"🐕"},
+      {v:"adults",   t:"Erwachsene",        d:"keine Einschränkung",             i:"🧑"},
+      {v:"fit",      t:"Sportlich unterwegs", d:"Steigung ist ausdrücklich erwünscht", i:"🏃"}
+    ]
+  },
+  {
+    key:"slope", q:"Wie viel Steigung ist okay?",
+    hint:"Am Blindsee sind kurze steile Rampen üblich — hier legst du fest, wie viel davon du willst.",
+    multi:false,
+    options:[
+      {v:"flat", t:"Möglichst flach",      d:"kaum Höhenmeter, gleichmäßig",   i:"➖"},
+      {v:"some", t:"Etwas bergauf ist fein", d:"moderate Anstiege sind okay",  i:"📈"},
+      {v:"any",  t:"Egal, Hauptsache schön", d:"Höhenmeter spielen keine Rolle", i:"⛰"}
+    ]
+  },
+  {
+    key:"want", q:"Worauf habt ihr Lust?",
+    hint:"Mehrfachauswahl möglich. Danach wird gewichtet, welche Runde am besten passt.",
+    multi:true,
+    options:[
+      {v:"water", t:"Ans Wasser",          d:"möglichst viel direkt am Ufer",   i:"🏖"},
+      {v:"view",  t:"Aussicht & Fotos",    d:"Panoramablicke, Höhenpunkte",     i:"📷"},
+      {v:"shade", t:"Schatten & Wald",     d:"kühl auch bei Sonne",             i:"🌲"},
+      {v:"spots", t:"Viel sehen",          d:"möglichst viele markierte Orte",  i:"🧭"},
+      {v:"quiet", t:"Ruhe",                d:"abseits von Parkplatz und Straße", i:"🤫"}
+    ]
+  }
+];
+
+let wizStep = 0;
+const answers = {size:null, who:null, slope:null, want:[]};
+
+function openWizard(){
+  wizStep = 0;
+  document.getElementById("wizard").hidden = false;
+  drawWizard();
+}
+function closeWizard(){ document.getElementById("wizard").hidden = true; }
+
+function drawWizard(){
+  const q = QUESTIONS[wizStep];
+  document.getElementById("wiz-no").textContent = `Schritt ${wizStep + 1} von ${QUESTIONS.length}`;
+  document.getElementById("wiz-q").textContent = q.q;
+  document.getElementById("wiz-hint").textContent = q.hint;
+  document.getElementById("wiz-bar").style.width = ((wizStep + 1) / QUESTIONS.length * 100) + "%";
+  document.getElementById("wiz-back").style.visibility = wizStep === 0 ? "hidden" : "visible";
+  document.getElementById("wiz-next").textContent =
+    wizStep === QUESTIONS.length - 1 ? "Runde vorschlagen" : "Weiter";
+
+  const cur = answers[q.key];
+  document.getElementById("wiz-body").innerHTML = q.options.map(o => {
+    const on = q.multi ? (cur || []).includes(o.v) : cur === o.v;
+    return `<button class="opt ${on ? "on" : ""}" data-v="${o.v}">
+      <span class="opt-ico">${o.i}</span>
+      <span class="opt-main"><span class="opt-t">${o.t}</span><span class="opt-d">${o.d}</span></span>
+      <span class="opt-check"></span></button>`;
+  }).join("");
+
+  document.getElementById("wiz-body").querySelectorAll(".opt").forEach(b =>
+    b.addEventListener("click", () => {
+      const v = b.dataset.v;
+      if (q.multi){
+        const arr = answers[q.key] || [];
+        answers[q.key] = arr.includes(v) ? arr.filter(x => x !== v) : arr.concat(v);
+      } else {
+        answers[q.key] = v;
+      }
+      drawWizard();
+      updateNext();
+    }));
+  updateNext();
+}
+
+function updateNext(){
+  const q = QUESTIONS[wizStep];
+  const cur = answers[q.key];
+  const ok = q.multi ? true : !!cur;
+  document.getElementById("wiz-next").disabled = !ok;
+}
+
+document.getElementById("wiz-next").addEventListener("click", () => {
+  if (wizStep < QUESTIONS.length - 1){ wizStep++; drawWizard(); }
+  else { closeWizard(); applyWizard(); }
+});
+document.getElementById("wiz-back").addEventListener("click", () => {
+  if (wizStep > 0){ wizStep--; drawWizard(); }
+});
+document.getElementById("wiz-close").addEventListener("click", closeWizard);
+document.getElementById("open-wizard").addEventListener("click", openWizard);
+
+/* --------- Bewertung: harte Anforderungen, dann gewichtete Wünsche --------- */
+const BAND_ORDER = ["mini", "kurz", "see", "gross", "pano"];
+
+function scoreRoutes(){
+  const want = answers.want || [];
+  const wantedIdx = BAND_ORDER.indexOf(answers.size);
+  const results = [];
+
+  for (const r of ROUTES){
+    const reasons = [], blockers = [];
+
+    // Harte Anforderungen
+    if (answers.who === "stroller" && !r.stroller_ok)
+      blockers.push("nicht kinderwagentauglich");
+    if (answers.who === "kids" && (r.km > 4.5 || r.steep_share > 0.14))
+      blockers.push("für kleine Kinder zu lang oder zu steil");
+    if (answers.who === "dog" && !r.dog_ok)
+      blockers.push("Treppen auf der Strecke");
+    if (answers.slope === "flat" && r.steep_share > 0.12)
+      blockers.push("zu viele steile Abschnitte");
+
+    let score = 0;
+
+    // Passung zur gewünschten Größe (Nachbarklassen zählen abgeschwächt)
+    const idx = BAND_ORDER.indexOf(r.id);
+    const gap = Math.abs(idx - wantedIdx);
+    score += gap === 0 ? 40 : gap === 1 ? 22 : gap === 2 ? 8 : 0;
+    if (gap === 0) reasons.push("entspricht genau der gewünschten Rundenlänge");
+    else if (gap === 1) reasons.push("etwas " + (idx > wantedIdx ? "länger" : "kürzer") + " als gewünscht");
+
+    // Steigung
+    if (answers.slope === "flat"){
+      score += Math.max(0, 18 - r.steep_share * 120);
+      if (r.steep_share < 0.05) reasons.push("durchgehend flach");
+    } else if (answers.slope === "some"){
+      score += r.ascent_m > 40 && r.ascent_m < 200 ? 14 : 6;
+    } else {
+      score += Math.min(18, r.ascent_m / 14);
+      if (r.ascent_m > 150) reasons.push(`${r.ascent_m} Höhenmeter`);
+    }
+
+    // Begleitung
+    if (answers.who === "stroller" && r.stroller_ok){
+      score += 16; reasons.push("kinderwagentauglich: keine Stufen, fester Belag");
+    }
+    if (answers.who === "kids"){
+      score += Math.max(0, 14 - r.km * 2);
+      if (r.hotspots.length >= 3) { score += 8; reasons.push("unterwegs gibt es viel zu entdecken"); }
+    }
+    if (answers.who === "dog"){
+      score += r.shade_share * 14 + r.lake_share * 10;
+      if (r.shade_share > .3) reasons.push("viel Schatten für den Hund");
+      if (r.lake_share > .4) reasons.push("Wasserzugang unterwegs");
+    }
+    if (answers.who === "fit") score += Math.min(14, r.ascent_m / 18);
+
+    // Wünsche
+    if (want.includes("water")){
+      score += r.lake_share * 26;
+      if (r.lake_share > .5) reasons.push(`${Math.round(r.lake_share*100)} % der Strecke direkt am Ufer`);
+    }
+    if (want.includes("shade")){
+      score += r.shade_share * 24;
+      if (r.shade_share > .3) reasons.push(`${Math.round(r.shade_share*100)} % durch Wald`);
+    }
+    if (want.includes("view")){
+      score += Math.min(22, (r.highpoint_m - r.lowpoint_m) / 4);
+      const views = r.hotspots.filter(id => (SPOT_BY_ID[id] || {}).category === "photo").length;
+      score += views * 6;
+      if (views) reasons.push(`${views} Aussichtspunkt${views > 1 ? "e" : ""} auf der Strecke`);
+    }
+    if (want.includes("spots")){
+      score += r.hotspots.length * 5;
+      if (r.hotspots.length >= 4) reasons.push(`${r.hotspots.length} markierte Orte unterwegs`);
+    }
+    if (want.includes("quiet")){
+      score += (1 - r.lake_share) * 8 + r.shade_share * 10;
+      if (r.shade_share > .4) reasons.push("ruhiger Waldweg abseits des Ufers");
+    }
+
+    results.push({route:r, score, reasons, blockers});
+  }
+
+  results.sort((a, b) =>
+    (a.blockers.length - b.blockers.length) || (b.score - a.score));
+  return results;
+}
+
+function applyWizard(){
+  const res = scoreRoutes();
+  const usable = res.filter(x => !x.blockers.length);
+  const list = (usable.length ? usable : res).map(x => x.route);
+  const reasons = {};
+  (usable.length ? usable : res).forEach((x, i) => {
+    if (i === 0){
+      reasons[x.route.id] = `<b>Beste Übereinstimmung.</b> ` +
+        (x.reasons.length ? x.reasons.join(" · ") : "passt zu deiner Auswahl") + ".";
+    } else if (i < 3 && x.reasons.length){
+      reasons[x.route.id] = x.reasons.slice(0, 2).join(" · ") + ".";
+    }
+    if (x.blockers.length){
+      reasons[x.route.id] = `<b style="color:var(--amber)">Mit Einschränkung:</b> ${x.blockers.join(", ")}.`;
+    }
+  });
+
+  showTab("routes");
+  activeRoute = list[0];
+  renderRoutes(list, reasons);
+  selectRoute(list[0], {fly:true});
+  setSheet("full");
+  document.getElementById("sheet-sub").textContent =
+    usable.length ? `${usable.length} von ${ROUTES.length} Runden passen zu deiner Auswahl`
+                  : "Keine Runde erfüllt alle Kriterien — hier die nächstbesten";
+}
+</script>
 </body>
 </html>

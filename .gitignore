@@ -1,9 +1,15 @@
 venv/
 venv2/
-*.tif
-*.asc
-*.prj
-*.aux.xml
 __pycache__/
 *.pyc
 .DS_Store
+
+# Rohdaten: das 41-MB-DEM-Kachelblatt bleibt draussen, der daraus
+# geschnittene Ausschnitt dem_wide.asc wird dagegen mitversioniert,
+# damit sich die Karte ohne den grossen Download neu bauen laesst.
+*.tif
+cropped*.asc
+cropped*.prj
+cropped*.aux.xml
+dem_wide.prj
+dem_wide.asc.aux.xml
