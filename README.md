@@ -31,6 +31,12 @@ Interaktive 3D-Karte mit **echten, berechneten Rundwegen** rund um den Blindsee 
   bleibt gleich), alternative Streckenführungen wo das Wegenetz sie hergibt,
   Abstecher zu lohnenden Zielen über echte Wege — und eigene Punkte (WC,
   Wickelraum, Parkplatz, Bank), die sich auch als Startpunkt wählen lassen.
+- **GPX-Export** je Runde — inklusive Wegpunkten für Orte, Rastpunkte, eigene
+  Punkte und Warnmarken an den Treppen. Läuft in Komoot, OsmAnd, Garmin.
+- **Interaktives Höhenprofil**, nach Steigung eingefärbt: beim Fahren über das
+  Profil wandert eine Marke auf der Karte mit, mit Kilometer, Höhe und Prozent.
+- **Höhenlinien** zuschaltbar (⛰), gerechnet im Browser aus denselben
+  Terrain-Kacheln, die die Karte ohnehin lädt — keine zusätzliche Datenquelle.
 - **Filterleiste** über Länge, Kinderwagen-Ampel und Eigenschaften (am Wasser,
   Schatten, viele Bänke, viel zu sehen, flach) mit laufender Trefferzahl.
 - **Bedienung über ein Bottom-Sheet** in drei Stufen (Vorschau / halb / ganz)
@@ -131,6 +137,19 @@ python3 -m http.server 8088   # dann http://127.0.0.1:8088/
 Wege und Orte © OpenStreetMap-Mitwirkende (ODbL) · Luftbild © Esri, Maxar,
 Earthstar Geographics · Höhendaten Mapzen/AWS Terrain Tiles ·
 Bodenfotos © Panoramax-Mitwirkende (CC-BY-SA)
+
+## Fremde Bibliotheken
+
+| Bibliothek | Lizenz | wofür |
+|---|---|---|
+| [MapLibre GL JS](https://github.com/maplibre/maplibre-gl-js) | BSD-3-Clause | Kartendarstellung, Gelände |
+| [maplibre-contour](https://github.com/onthegomap/maplibre-contour) | BSD-3-Clause | Höhenlinien im Browser, erst beim Einschalten geladen |
+
+Beide Lizenzen sind mit der MIT-Lizenz dieses Projekts vereinbar. Routen-Motor,
+Schattenberechnung, Sonnenstand und GPX-Export sind eigener Code — Anregungen
+dafür kamen von [gpx.studio](https://github.com/gpxstudio/gpx.studio) (MIT) und
+[Trail Planner](https://github.com/bogdandm/georgia-routing-planner), ohne Code
+zu übernehmen.
 
 ## Lizenz
 

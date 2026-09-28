@@ -296,6 +296,8 @@ body.kw .sh-h{font-size:10px}
   <button class="cta" id="open-wizard">Tour finden</button>
   <button class="icon-btn kw-toggle" id="btn-kw" aria-pressed="false"
           title="Kinderwagen-Modus">👶</button>
+  <button class="icon-btn kw-toggle" id="btn-contour" aria-pressed="false"
+          title="Höhenlinien">⛰</button>
   <button class="icon-btn" id="btn-reset" title="Übersicht">⌂</button>
 </header>
 
@@ -387,7 +389,7 @@ const map = new maplibregl.Map({
     sources:{
       sat:{type:"raster", tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
         tileSize:256, maxzoom:19,
-        attribution:"Luftbild © Esri, Maxar, Earthstar Geographics · Wege © OpenStreetMap-Mitwirkende · Höhen © Mapzen/AWS"},
+        attribution:"Luftbild © Esri, Maxar, Earthstar Geographics · Wege © OpenStreetMap-Mitwirkende · Höhen © Mapzen/AWS · Höhenlinien via maplibre-contour (BSD-3)"},
       dem:{type:"raster-dem", tiles:["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
         tileSize:256, maxzoom:15, encoding:"terrarium"}
     },
@@ -470,6 +472,8 @@ map.on("load", () => {
     layout:{"line-cap":"round","line-join":"round"},
     paint:{"line-color":"#eaf4ff","line-width":1.6,"line-dasharray":[1.5,2.5],"line-opacity":.75}});
 
+  map.addSource("profpos", {type:"geojson", data:emptyFC()});
+
   map.addSource("spur", {type:"geojson", data:emptyFC()});
   map.addLayer({id:"spur-line", type:"line", source:"spur",
     layout:{"line-cap":"round","line-join":"round"},
@@ -496,6 +500,10 @@ map.on("load", () => {
             "icon-size":0.5, "icon-rotation-alignment":"map", "icon-allow-overlap":true,
             "visibility":"none"},
     paint:{"icon-opacity":0.95}});
+
+  map.addLayer({id:"profpos-dot", type:"circle", source:"profpos",
+    paint:{"circle-radius":8,"circle-color":"#ffffff","circle-stroke-width":3,
+           "circle-stroke-color":"#f0883e"}});
 
   map.addSource("tourpos", {type:"geojson", data:emptyFC()});
   map.addLayer({id:"tour-puck-halo", type:"circle", source:"tourpos",
@@ -808,14 +816,17 @@ function renderDetail(r){
     </div>
     <div class="section-h">Höhenprofil</div>
     <svg class="profile" id="prof" viewBox="0 0 300 58" preserveAspectRatio="none"></svg>
+    <div id="prof-readout" style="font-size:11.5px;margin-top:4px;line-height:1.4"></div>
     <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:2px">
-      <span>${r.lowpoint_m} m</span><span>${r.highpoint_m} m</span>
+      <span>tiefster Punkt ${r.lowpoint_m} m</span><span>höchster ${r.highpoint_m} m</span>
     </div>
     ${kwMode ? kwSection(r) : ""}
     <div class="section-h">Schatten im Tagesverlauf</div>
     ${shadeStrip(r)}
-    <button class="btn btn-ghost" id="btn-tour" style="width:100%;margin-top:12px">
-      ▶ Runde abfahren (3D)</button>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-ghost" id="btn-tour" style="flex:1">▶ Abfahren</button>
+      <button class="btn btn-ghost" id="btn-gpx" style="flex:1">↓ GPX</button>
+    </div>
     <div class="section-h">Beschaffenheit</div>
     <div class="card-meta">${routePills(r)}</div>
     <div class="card-desc">${r.desc}</div>
@@ -832,6 +843,8 @@ function renderDetail(r){
   bindShadeStrip(r);
   const tourBtn = document.getElementById("btn-tour");
   if (tourBtn) tourBtn.addEventListener("click", () => enterTour(r, 0));
+  const gpxBtn = document.getElementById("btn-gpx");
+  if (gpxBtn) gpxBtn.addEventListener("click", () => downloadGPX(r));
   el.querySelectorAll("[data-spot]").forEach(row =>
     row.addEventListener("click", () => openSpot(SPOT_BY_ID[row.dataset.spot])));
 }
@@ -878,15 +891,230 @@ function kwSection(r){
     ).join("")}</div>` : `<div class="kw-note">Keine besonderen Stellen verzeichnet.</div>`}`;
 }
 
+/* Hoehenprofil: nach Steigung eingefaerbt und mit der Karte gekoppelt -
+   beim Fahren ueber das Profil wandert eine Marke auf der Strecke mit.
+   Dieses Zusammenspiel haben gaengige Tourenplaner, es macht ein Profil
+   erst lesbar: man sieht, WO der Anstieg liegt. */
+const GRADE_COLORS = [
+  [4,  "#4aa8ff"],   // flach
+  [8,  "#3fb950"],   // sanft
+  [12, "#d29922"],   // spuerbar
+  [18, "#f0883e"],   // steil
+  [99, "#f85149"],   // sehr steil
+];
+function gradeColor(pct){
+  for (const [lim, col] of GRADE_COLORS) if (pct < lim) return col;
+  return "#f85149";
+}
+
 function drawProfile(r){
   const svg = document.getElementById("prof");
   if (!svg || !r.profile || r.profile.length < 2) return;
-  const zs = r.profile, lo = Math.min(...zs), hi = Math.max(...zs), span = Math.max(1, hi - lo);
-  const pts = zs.map((z, i) => [i / (zs.length - 1) * 300, 54 - (z - lo) / span * 44]);
-  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const zs = r.profile;
+  const lo = Math.min(...zs), hi = Math.max(...zs), span = Math.max(1, hi - lo);
+  const W = 300, H = 58, segM = (r.km * 1000) / (zs.length - 1);
+  const X = i => i / (zs.length - 1) * W;
+  const Y = z => H - 4 - (z - lo) / span * 44;
+
+  let parts = "";
+  for (let i = 1; i < zs.length; i++){
+    const g = Math.abs(zs[i] - zs[i - 1]) / Math.max(1, segM) * 100;
+    parts += `<line x1="${X(i-1).toFixed(1)}" y1="${Y(zs[i-1]).toFixed(1)}" `
+          +  `x2="${X(i).toFixed(1)}" y2="${Y(zs[i]).toFixed(1)}" `
+          +  `stroke="${gradeColor(g)}" stroke-width="2.2" stroke-linecap="round"/>`;
+  }
+  const area = zs.map((z, i) => (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(z).toFixed(1)).join(" ");
   svg.innerHTML =
-    `<path d="${d} L300 58 L0 58 Z" fill="rgba(74,168,255,.16)"/>` +
-    `<path d="${d}" fill="none" stroke="#4aa8ff" stroke-width="1.6" stroke-linejoin="round"/>`;
+    `<path d="${area} L${W} ${H} L0 ${H} Z" fill="rgba(74,168,255,.12)"/>` + parts +
+    `<line id="prof-cursor" x1="0" y1="0" x2="0" y2="${H}" stroke="#fff" stroke-width="1" opacity="0"/>`;
+
+  const readout = document.getElementById("prof-readout");
+  const move = ev => {
+    const rect = svg.getBoundingClientRect();
+    const cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+    const frac = Math.max(0, Math.min(1, cx / rect.width));
+    const i = Math.round(frac * (zs.length - 1));
+    const cur = svg.querySelector("#prof-cursor");
+    if (cur){ cur.setAttribute("x1", X(i)); cur.setAttribute("x2", X(i)); cur.setAttribute("opacity", "0.9"); }
+    const g = i > 0 ? Math.abs(zs[i] - zs[i - 1]) / Math.max(1, segM) * 100 : 0;
+    if (readout) readout.innerHTML =
+      `<b>km ${(frac * r.km).toFixed(2).replace(".", ",")}</b> · ${Math.round(zs[i])} m ü. NN · ` +
+      `<span style="color:${gradeColor(g)}">${g.toFixed(0)} % Steigung</span>`;
+    const src = map.getSource("profpos");
+    const c = pointAtOn(r, frac * lineLength(r.coords));
+    if (src && c) src.setData({type:"Feature", geometry:{type:"Point", coordinates:c}, properties:{}});
+    if (ev.cancelable) ev.preventDefault();
+  };
+  const leave = () => {
+    const cur = svg.querySelector("#prof-cursor");
+    if (cur) cur.setAttribute("opacity", "0");
+    const src = map.getSource("profpos");
+    if (src) src.setData(emptyFC());
+    if (readout) readout.innerHTML = profLegend();
+  };
+  svg.onmousemove = move; svg.onmouseleave = leave;
+  svg.ontouchstart = move; svg.ontouchmove = move; svg.ontouchend = leave;
+  if (readout) readout.innerHTML = profLegend();
+}
+
+function profLegend(){
+  return `<span style="color:var(--faint)">Über das Profil fahren zeigt die Stelle auf der Karte</span>`;
+}
+
+/* ====================== Hoehenlinien ======================
+   maplibre-contour (BSD-3-Clause, onthegomap) rechnet Hoehenlinien direkt im
+   Browser aus denselben Terrain-Kacheln, die die Karte ohnehin laedt - also
+   ohne zusaetzliche Datenquelle. Wird erst beim Einschalten nachgeladen. */
+const DEM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+let contourReady = false, contourOn = false, contourLoading = null;
+
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const el = document.createElement("script");
+    el.src = src; el.onload = res; el.onerror = rej;
+    document.head.appendChild(el);
+  });
+}
+
+async function setupContours(){
+  if (contourReady) return true;
+  if (contourLoading) return contourLoading;
+  contourLoading = (async () => {
+    await loadScript("https://cdn.jsdelivr.net/npm/maplibre-contour@0.1.0/dist/index.min.js");
+    const dem = new mlcontour.DemSource({
+      url: DEM_TILES, encoding: "terrarium", maxzoom: 15, worker: true,
+    });
+    dem.setupMaplibre(maplibregl);
+    map.addSource("contours", {
+      type: "vector", maxzoom: 15,
+      tiles: [dem.contourProtocolUrl({
+        thresholds: {11:[100, 500], 12:[50, 250], 13:[25, 100], 14:[10, 50], 15:[10, 50]},
+        contourLayer: "contours", elevationKey: "ele", levelKey: "level",
+        extent: 4096, buffer: 1,
+      })],
+    });
+    map.addLayer({id:"contour-line", type:"line", source:"contours",
+      "source-layer":"contours",
+      paint:{"line-color":"rgba(255,255,255,.5)",
+             "line-width":["match", ["get","level"], 1, 1.2, 0.6]}}, "route-glow");
+    map.addLayer({id:"contour-label", type:"symbol", source:"contours",
+      "source-layer":"contours", filter:[">", ["get","level"], 0],
+      layout:{"symbol-placement":"line", "text-size":10,
+              "text-font":["Noto Sans Regular"],
+              "text-field":["concat", ["to-string", ["get","ele"]], " m"]},
+      paint:{"text-color":"#ffffff", "text-halo-color":"rgba(0,0,0,.65)",
+             "text-halo-width":1.2}}, "route-glow");
+    contourReady = true;
+    return true;
+  })().catch(() => { contourLoading = null; return false; });
+  return contourLoading;
+}
+
+async function toggleContours(){
+  const btn = document.getElementById("btn-contour");
+  if (!contourReady){
+    btn.textContent = "…";
+    const ok = await setupContours();
+    btn.textContent = "⛰";
+    if (!ok){ btn.title = "Höhenlinien konnten nicht geladen werden"; return; }
+    contourOn = true;
+  } else {
+    contourOn = !contourOn;
+    ["contour-line", "contour-label"].forEach(id => {
+      if (map.getLayer(id))
+        map.setLayoutProperty(id, "visibility", contourOn ? "visible" : "none");
+    });
+  }
+  btn.setAttribute("aria-pressed", String(contourOn));
+  try { localStorage.setItem("blindsee-contour", contourOn ? "1" : "0"); } catch(e){}
+}
+
+document.getElementById("btn-contour").addEventListener("click", toggleContours);
+
+/* ====================== GPX-Export ======================
+   Jeder ausgereifte Tourenplaner kann das, und ohne Export ist die Runde
+   hier gefangen - mit GPX laeuft sie in Komoot, OsmAnd, Garmin oder OruxMaps.
+   Selbst geschrieben; GPX 1.1 ist ein schlankes, offenes Format. */
+function elevAlong(r, frac){
+  const prof = r.profile;
+  if (!prof || !prof.length) return null;
+  const x = Math.max(0, Math.min(1, frac)) * (prof.length - 1);
+  const i = Math.floor(x), t = x - i;
+  return prof[i] + (prof[Math.min(prof.length - 1, i + 1)] - prof[i]) * t;
+}
+
+function routeGPX(r){
+  const esc = t => String(t).replace(/[<>&'"]/g, c =>
+    ({"<":"&lt;", ">":"&gt;", "&":"&amp;", "'":"&apos;", '"':"&quot;"}[c]));
+  const total = lineLength(r.coords) || 1;
+  let acc = 0;
+  const pts = r.coords.map((c, i) => {
+    if (i > 0){
+      const a = r.coords[i - 1];
+      acc += Math.hypot((c[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
+                        (c[1] - a[1]) * 110540);
+    }
+    const ele = elevAlong(r, acc / total);
+    return `   <trkpt lat="${c[1].toFixed(6)}" lon="${c[0].toFixed(6)}">` +
+           (ele === null ? "" : `<ele>${ele.toFixed(1)}</ele>`) + `</trkpt>`;
+  }).join("\n");
+
+  const wpts = [];
+  (r.hotspots || []).forEach(id => {
+    const sp = SPOT_BY_ID[id];
+    if (sp) wpts.push(`  <wpt lat="${sp.lat}" lon="${sp.lon}">
+    <name>${esc(sp.name)}</name><sym>Flag</sym></wpt>`);
+  });
+  (r.rest_points || []).forEach(p => wpts.push(
+    `  <wpt lat="${p.lat}" lon="${p.lon}">
+    <name>${esc(p.name)} (km ${p.at_km.toFixed(2).replace(".", ",")})</name><sym>Picnic Area</sym></wpt>`));
+  (r.steps_at || []).forEach(x => {
+    const c = pointAtOn(r, x.at_km * 1000);
+    if (c) wpts.push(`  <wpt lat="${c[1].toFixed(6)}" lon="${c[0].toFixed(6)}">
+    <name>Treppen ${x.length_m} m — Wagen tragen</name><sym>Danger Area</sym></wpt>`);
+  });
+  myPoints.forEach(mp => wpts.push(`  <wpt lat="${mp.lat}" lon="${mp.lon}">
+    <name>${esc(mp.name)}</name><sym>Flag</sym></wpt>`));
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Blindsee Tourenkarte"
+     xmlns="http://www.topografix.com/GPX/1/1">
+ <metadata>
+  <name>${esc(r.name)}</name>
+  <desc>${esc(`${r.km.toFixed(2).replace(".", ",")} km Rundweg, ${r.ascent_m} Hm, ${r.duration}. Wege und Orte aus OpenStreetMap (ODbL).`)}</desc>
+ </metadata>
+${wpts.join("\n")}
+ <trk>
+  <name>${esc(r.name)}</name>
+  <trkseg>
+${pts}
+  </trkseg>
+ </trk>
+</gpx>`;
+}
+
+function pointAtOn(r, distM){
+  let acc = 0;
+  for (let i = 1; i < r.coords.length; i++){
+    const a = r.coords[i - 1], b = r.coords[i];
+    const seg = Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
+                           (b[1] - a[1]) * 110540);
+    if (acc + seg >= distM){
+      const t = seg ? (distM - acc) / seg : 0;
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    }
+    acc += seg;
+  }
+  return r.coords[r.coords.length - 1];
+}
+
+function downloadGPX(r){
+  const blob = new Blob([routeGPX(r)], {type:"application/gpx+xml"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = r.name.replace(/[^\wäöüÄÖÜß-]+/g, "_") + ".gpx";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 /* ============================ Anpassen ============================ */
