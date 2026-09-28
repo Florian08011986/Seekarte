@@ -148,6 +148,35 @@ body.kw .btn{height:50px;font-size:15px}
 body.kw .stat-v{font-size:16px}
 body.kw .sheet-title{font-size:16.5px}
 
+/* ---------- Filterleiste ---------- */
+.filters{position:sticky;top:0;z-index:2;background:var(--surface);padding:2px 0 10px;
+  margin-bottom:2px}
+.frow{display:flex;gap:6px;overflow-x:auto;padding:4px 0;scrollbar-width:none}
+.frow::-webkit-scrollbar{display:none}
+.flabel{font-size:10px;font-weight:700;color:var(--faint);text-transform:uppercase;
+  letter-spacing:.06em;margin:6px 0 2px}
+.chip{flex:none;font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:99px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.on{background:var(--accent-soft);border-color:rgba(74,168,255,.45);color:var(--accent)}
+.fcount{font-size:11.5px;color:var(--faint);padding:8px 2px 2px}
+body.kw .chip{font-size:13.5px;padding:9px 14px}
+
+/* ---------- Anpassen ---------- */
+.opt-row{display:flex;align-items:center;gap:11px;padding:12px;border-radius:13px;
+  background:var(--surface-2);border:1.5px solid transparent;margin-bottom:8px;width:100%;
+  text-align:left}
+.opt-row.on{border-color:var(--accent);background:var(--accent-soft)}
+.opt-row .r-main{flex:1;min-width:0}
+.opt-row .r-t{font-size:13.5px;font-weight:650}
+.opt-row .r-d{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+.opt-row .r-x{font-size:12px;font-weight:700;color:var(--accent);flex:none}
+.delta{font-size:11.5px;font-weight:700;color:var(--amber)}
+.addbar{display:flex;gap:7px;margin:8px 0 4px;flex-wrap:wrap}
+.addbar .chip{flex:none}
+.hint-box{font-size:12px;line-height:1.5;color:var(--muted);background:#0f151c;
+  border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin:8px 0}
+.picking{outline:3px solid var(--accent);outline-offset:-3px}
+
 /* ---------- Wizard ---------- */
 .overlay{position:fixed;inset:0;z-index:60;background:rgba(9,12,16,.93);
   backdrop-filter:blur(14px);display:flex;align-items:flex-end;justify-content:center}
@@ -278,12 +307,17 @@ body.kw .sh-h{font-size:10px}
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="routes" aria-selected="true">Runden</button>
-    <button class="tab" role="tab" data-tab="spots" aria-selected="false">Orte</button>
     <button class="tab" role="tab" data-tab="detail" aria-selected="false">Details</button>
+    <button class="tab" role="tab" data-tab="edit" aria-selected="false">Anpassen</button>
+    <button class="tab" role="tab" data-tab="spots" aria-selected="false">Orte</button>
   </nav>
-  <div class="panel" data-active id="panel-routes"></div>
-  <div class="panel" id="panel-spots"></div>
+  <div class="panel" data-active id="panel-routes">
+    <div class="filters" id="filters"></div>
+    <div id="route-list"></div>
+  </div>
   <div class="panel" id="panel-detail"></div>
+  <div class="panel" id="panel-edit"></div>
+  <div class="panel" id="panel-spots"></div>
 </section>
 
 <div class="overlay" id="wizard" hidden>
@@ -367,7 +401,46 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({visualizePitch:true}), "bottom-left");
 map.touchZoomRotate.enableRotation();
 
-let activeRoute = null, activeSpot = null;
+let activeRoute = null, activeBase = null, activeSpot = null;
+
+/* ---- Anpassungen je Runde: Variante, Startpunkt, Abstecher ---- */
+const custom = loadJSON("blindsee-custom", {});
+const myPoints = loadJSON("blindsee-points", []);
+const MY_KINDS = [
+  {k:"wc",      t:"WC",         i:"🚻"},
+  {k:"diaper",  t:"Wickelraum", i:"🍼"},
+  {k:"parking", t:"Parkplatz",  i:"🅿️"},
+  {k:"bench",   t:"Bank",       i:"🪑"},
+  {k:"other",   t:"Sonstiges",  i:"📌"},
+];
+
+function loadJSON(key, fallback){
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch(e){ return fallback; }
+}
+function saveJSON(key, val){
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){}
+}
+/* Varianten werden erst beim Oeffnen von "Anpassen" geholt. */
+let VARIANTS = null, variantsLoading = null;
+function loadVariants(){
+  if (VARIANTS) return Promise.resolve(VARIANTS);
+  if (variantsLoading) return variantsLoading;
+  variantsLoading = fetch("variants.json")
+    .then(r => r.ok ? r.json() : {})
+    .catch(() => ({}))
+    .then(v => { VARIANTS = v || {}; return VARIANTS; });
+  return variantsLoading;
+}
+function variantsOf(id){ return (VARIANTS && VARIANTS[id]) || []; }
+
+function customFor(id){
+  if (!custom[id]) custom[id] = {variant:0, startDist:0, spurs:{}};
+  return custom[id];
+}
+
+/* ---- Filterzustand ---- */
+const filters = {len:"all", wagen:"all", props:[]};
 
 /* Kinderwagen-Modus: blendet Rastpunkte ein, vergroessert die Bedienflaechen
    und stellt ueberall die Kinderwagen-Ampel in den Vordergrund. */
@@ -386,7 +459,7 @@ map.on("load", () => {
     "sky-color":"#7fb2e5", "horizon-color":"#dbe8f4", "fog-color":"#c4d6e6",
     "sky-horizon-blend":.65, "horizon-fog-blend":.55, "fog-ground-blend":.3
   });
-  map.addSource("route", {type:"geojson", data:emptyFC()});
+  map.addSource("route", {type:"geojson", data:emptyFC(), lineMetrics:true});
   map.addLayer({id:"route-glow", type:"line", source:"route",
     layout:{"line-cap":"round","line-join":"round"},
     paint:{"line-color":"#4aa8ff","line-width":11,"line-opacity":.22,"line-blur":5}});
@@ -396,6 +469,11 @@ map.on("load", () => {
   map.addLayer({id:"route-dash", type:"line", source:"route",
     layout:{"line-cap":"round","line-join":"round"},
     paint:{"line-color":"#eaf4ff","line-width":1.6,"line-dasharray":[1.5,2.5],"line-opacity":.75}});
+
+  map.addSource("spur", {type:"geojson", data:emptyFC()});
+  map.addLayer({id:"spur-line", type:"line", source:"spur",
+    layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-color":"#d29922","line-width":3.5,"line-dasharray":[2,1.6]}});
 
   map.addSource("shade", {type:"geojson", data:emptyFC()});
   map.addLayer({id:"shade-line", type:"line", source:"shade",
@@ -412,11 +490,43 @@ map.on("load", () => {
 
   document.getElementById("btn-kw").setAttribute("aria-pressed", String(kwMode));
   document.body.classList.toggle("kw", kwMode);
+  makeArrowIcon();
+  map.addLayer({id:"route-arrows", type:"symbol", source:"route",
+    layout:{"symbol-placement":"line", "symbol-spacing":70, "icon-image":"dir-arrow",
+            "icon-size":0.5, "icon-rotation-alignment":"map", "icon-allow-overlap":true,
+            "visibility":"none"},
+    paint:{"icon-opacity":0.95}});
+
+  map.addSource("tourpos", {type:"geojson", data:emptyFC()});
+  map.addLayer({id:"tour-puck-halo", type:"circle", source:"tourpos",
+    paint:{"circle-radius":16,"circle-color":"#ffffff","circle-opacity":.22}});
+  map.addLayer({id:"tour-puck", type:"circle", source:"tourpos",
+    paint:{"circle-radius":7,"circle-color":"#ffffff","circle-stroke-width":3,
+           "circle-stroke-color":"#4aa8ff"}});
+
   renderRoutes(); renderSpots(); addSpotMarkers();
   selectRoute(ROUTES.find(r => r.id === "see") || ROUTES[0], {fly:true});
 });
 
 function emptyFC(){ return {type:"FeatureCollection", features:[]}; }
+
+/* Richtungspfeil als Canvas-Bild - so braucht die Karte keine externe Grafik. */
+function makeArrowIcon(){
+  const n = 48, c = document.createElement("canvas");
+  c.width = c.height = n;
+  const g = c.getContext("2d");
+  g.translate(n / 2, n / 2);
+  g.beginPath();
+  g.moveTo(0, -15); g.lineTo(11, 11); g.lineTo(0, 4); g.lineTo(-11, 11);
+  g.closePath();
+  g.fillStyle = "#ffffff";
+  g.strokeStyle = "rgba(10,20,30,.85)";
+  g.lineWidth = 2.5;
+  g.stroke(); g.fill();
+  const img = g.getImageData(0, 0, n, n);
+  if (!map.hasImage("dir-arrow"))
+    map.addImage("dir-arrow", {width:n, height:n, data:img.data});
+}
 
 /* ============================ Marker ============================ */
 function addSpotMarkers(){
@@ -469,13 +579,16 @@ function routePills(r){
 }
 
 function renderRoutes(list, reasons){
-  const rs = list || ROUTES;
-  const el = document.getElementById("panel-routes");
+  // mit den Anpassungen anzeigen, sonst widerspricht die Liste der Kopfzeile
+  const rs = (list || ROUTES).map(deriveRoute);
+  const el = document.getElementById("route-list");
   if (!rs.length){ el.innerHTML = `<div class="empty">Keine Runde passt zu dieser Auswahl.</div>`; return; }
   el.innerHTML = rs.map((r, i) => `
     <div class="card ${activeRoute && r.id === activeRoute.id ? "selected" : ""}" data-route="${r.id}">
       <div class="card-top">
-        <span class="card-name">${reasons && i === 0 ? "★ " : ""}${r.name}</span>
+        <span class="card-name">${reasons && i === 0 ? "★ " : ""}${r.name}${
+          r.variantIdx ? ` · Variante ${r.variantIdx}` : ""}${
+          (r.activeSpurs && r.activeSpurs.length) ? " · mit Abstecher" : ""}</span>
         <span class="card-km">${r.km.toFixed(2).replace(".", ",")} km</span>
       </div>
       <div class="card-meta">${routePills(r)}</div>
@@ -486,21 +599,30 @@ function renderRoutes(list, reasons){
     </div>`).join("");
   el.querySelectorAll("[data-route]").forEach(c =>
     c.addEventListener("click", () => selectRoute(ROUTES.find(r => r.id === c.dataset.route), {fly:true})));
+  renderFilters();
 }
 
-function selectRoute(r, opt){
-  if (!r) return;
+function selectRoute(base, opt){
+  if (!base) return;
+  activeBase = base;
+  const r = deriveRoute(base);
   activeRoute = r;
   const src = map.getSource("route");
   if (src) src.setData({type:"Feature", geometry:{type:"LineString", coordinates:r.coords}, properties:{}});
   highlightSpots(r.hotspots);
   renderRest(r);
   paintShade(r);
+  const spurSrc = map.getSource("spur");
+  if (spurSrc) spurSrc.setData({type:"FeatureCollection",
+    features:(r.activeSpurs || []).map(sp => ({
+      type:"Feature", geometry:{type:"LineString", coordinates:sp.coords},
+      properties:{}}))});
+  renderMyMarkers();
   document.getElementById("sheet-title").textContent = r.name;
   document.getElementById("sheet-sub").textContent =
     `${r.km.toFixed(2).replace(".", ",")} km Runde · ${r.ascent_m} Hm · ${r.duration}`;
   // nur die Markierung umsetzen statt die ganze Liste neu zu erzeugen
-  const cards = document.querySelectorAll("#panel-routes [data-route]");
+  const cards = document.querySelectorAll("#route-list [data-route]");
   if (cards.length) cards.forEach(c => c.classList.toggle("selected", c.dataset.route === r.id));
   else renderRoutes();
   renderDetail(r);
@@ -512,7 +634,167 @@ function selectRoute(r, opt){
   }
 }
 
+/* ============================ Filter ============================ */
+const LEN_FILTERS = [
+  {v:"all",   t:"Alle"},
+  {v:"short", t:"bis 2 km",  test:r => r.km <= 2},
+  {v:"mid",   t:"2–4 km",    test:r => r.km > 2 && r.km <= 4},
+  {v:"long",  t:"über 4 km", test:r => r.km > 4},
+];
+const WAGEN_FILTERS = [
+  {v:"all",    t:"Egal"},
+  {v:"green",  t:"nur problemlos", test:r => r.stroller_grade === "green"},
+  {v:"ok",     t:"auch machbar",   test:r => r.stroller_grade !== "red"},
+];
+const PROP_FILTERS = [
+  {v:"water", t:"am Wasser",   test:r => r.lake_share >= .5},
+  {v:"shade", t:"Schatten",    test:r => r.shade_share >= .3},
+  {v:"bench", t:"viele Bänke", test:r => r.benches >= 3},
+  {v:"spots", t:"viel zu sehen", test:r => r.hotspots.length >= 3},
+  {v:"flat",  t:"flach",       test:r => r.steep_share < .06},
+];
+
+function passesFilters(r){
+  const lf = LEN_FILTERS.find(f => f.v === filters.len);
+  if (lf && lf.test && !lf.test(r)) return false;
+  const wf = WAGEN_FILTERS.find(f => f.v === filters.wagen);
+  if (wf && wf.test && !wf.test(r)) return false;
+  for (const p of filters.props){
+    const pf = PROP_FILTERS.find(f => f.v === p);
+    if (pf && !pf.test(r)) return false;
+  }
+  return true;
+}
+
+function renderFilters(){
+  const el = document.getElementById("filters");
+  if (!el) return;
+  const hits = ROUTES.map(deriveRoute).filter(passesFilters).length;
+  el.innerHTML = `
+    <div class="flabel">Länge</div>
+    <div class="frow">${LEN_FILTERS.map(f =>
+      `<button class="chip ${filters.len === f.v ? "on" : ""}" data-len="${f.v}">${f.t}</button>`).join("")}</div>
+    <div class="flabel">Kinderwagen</div>
+    <div class="frow">${WAGEN_FILTERS.map(f =>
+      `<button class="chip ${filters.wagen === f.v ? "on" : ""}" data-wagen="${f.v}">${f.t}</button>`).join("")}</div>
+    <div class="flabel">Eigenschaften</div>
+    <div class="frow">${PROP_FILTERS.map(f =>
+      `<button class="chip ${filters.props.includes(f.v) ? "on" : ""}" data-prop="${f.v}">${f.t}</button>`).join("")}</div>
+    <div class="fcount">${hits} von ${ROUTES.length} Runden passen${
+      hits === 0 ? " — Filter zu eng" : ""}</div>`;
+  el.querySelectorAll("[data-len]").forEach(b => b.addEventListener("click", () => {
+    filters.len = b.dataset.len; applyFilters();
+  }));
+  el.querySelectorAll("[data-wagen]").forEach(b => b.addEventListener("click", () => {
+    filters.wagen = b.dataset.wagen; applyFilters();
+  }));
+  el.querySelectorAll("[data-prop]").forEach(b => b.addEventListener("click", () => {
+    const v = b.dataset.prop;
+    filters.props = filters.props.includes(v)
+      ? filters.props.filter(x => x !== v) : filters.props.concat(v);
+    applyFilters();
+  }));
+}
+
+function applyFilters(){
+  const list = ROUTES.filter(r => passesFilters(deriveRoute(r)));
+  renderRoutes(list.length ? list : []);
+  if (list.length && (!activeBase || !list.includes(activeBase)))
+    selectRoute(list[0], {fly:true});
+}
+
+/* ==================== Abgeleitete Runde ==================== */
+/* Variante, Startpunkt und Abstecher werden nicht in die Grunddaten
+   geschrieben, sondern bei jeder Anzeige daraufgelegt - so bleibt die
+   berechnete Runde unveraendert und alles ist jederzeit ruecksetzbar. */
+function lineLength(coords){
+  let d = 0;
+  for (let i = 1; i < coords.length; i++){
+    const a = coords[i - 1], b = coords[i];
+    d += Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
+                    (b[1] - a[1]) * 110540);
+  }
+  return d;
+}
+
+function rotateCoords(coords, startM){
+  const total = lineLength(coords);
+  if (!startM || startM <= 0 || startM >= total) return coords.slice();
+  let acc = 0, idx = 1, t = 0;
+  for (let i = 1; i < coords.length; i++){
+    const a = coords[i - 1], b = coords[i];
+    const seg = Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
+                           (b[1] - a[1]) * 110540);
+    if (acc + seg >= startM){ idx = i; t = seg ? (startM - acc) / seg : 0; break; }
+    acc += seg;
+  }
+  const a = coords[idx - 1], b = coords[idx];
+  const cut = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  return [cut].concat(coords.slice(idx, coords.length - 1))
+              .concat(coords.slice(0, idx)).concat([cut]);
+}
+
+function shiftKm(v, startKm, totalKm){
+  const x = (v - startKm) % totalKm;
+  return Math.round((x < 0 ? x + totalKm : x) * 100) / 100;
+}
+
+function deriveRoute(base){
+  const c = customFor(base.id);
+  const vs = variantsOf(base.id);
+  const variant = c.variant > 0 && vs[c.variant - 1] ? vs[c.variant - 1] : null;
+  const r = Object.assign({}, base, variant || {});
+  r.id = base.id; r.name = base.name;
+  r.desc = base.desc; r.desc_kw = base.desc_kw;
+  r.variants = vs; r.spurs = base.spurs || [];
+  // Schattenprofil ist nur fuer die Standardfuehrung gerechnet
+  r.shade = variant ? null : base.shade;
+  r.variantIdx = c.variant;
+
+  const startM = c.startDist || 0;
+  r.startDist = startM;
+  if (startM > 0){
+    const totalKm = r.km;
+    const startKm = startM / 1000;
+    r.coords = rotateCoords(r.coords, startM);
+    r.steep_sections = (r.steep_sections || []).map(x =>
+      Object.assign({}, x, {at_km: shiftKm(x.at_km, startKm, totalKm)}))
+      .sort((a, b) => a.at_km - b.at_km);
+    r.steps_at = (r.steps_at || []).map(x =>
+      Object.assign({}, x, {at_km: shiftKm(x.at_km, startKm, totalKm)}))
+      .sort((a, b) => a.at_km - b.at_km);
+    r.rest_points = (r.rest_points || []).map(x =>
+      Object.assign({}, x, {at_km: shiftKm(x.at_km, startKm, totalKm)}))
+      .sort((a, b) => a.at_km - b.at_km);
+    r.spurs = r.spurs.map(x =>
+      Object.assign({}, x, {at_km: shiftKm(x.at_km, startKm, totalKm)}))
+      .sort((a, b) => a.at_km - b.at_km);
+    r.shadeShift = startM;
+  }
+
+  const on = r.spurs.filter(x => c.spurs[spurKey(x)]);
+  r.activeSpurs = on;
+  if (on.length){
+    const extra = on.reduce((s, x) => s + x.detour_m, 0);
+    r.km = Math.round((r.km + extra / 1000) * 100) / 100;
+    r.minutes = r.minutes + Math.round(extra / 4000 * 60);
+    r.duration = r.minutes >= 60
+      ? `${Math.floor(r.minutes / 60)}h ${String(r.minutes % 60).padStart(2, "0")}m`
+      : `${r.minutes} Min`;
+  }
+  return r;
+}
+
+function spurKey(sp){ return `${sp.kind}:${sp.lat},${sp.lon}`; }
+
 /* ============================ Details ============================ */
+function refreshActive(opt){
+  if (!activeBase) return;
+  saveJSON("blindsee-custom", custom);
+  selectRoute(activeBase, opt || {});
+  renderFilters();
+}
+
 function renderDetail(r){
   const el = document.getElementById("panel-detail");
   if (!r){ el.innerHTML = `<div class="empty">Wähle eine Runde.</div>`; return; }
@@ -605,6 +887,203 @@ function drawProfile(r){
   svg.innerHTML =
     `<path d="${d} L300 58 L0 58 Z" fill="rgba(74,168,255,.16)"/>` +
     `<path d="${d}" fill="none" stroke="#4aa8ff" stroke-width="1.6" stroke-linejoin="round"/>`;
+}
+
+/* ============================ Anpassen ============================ */
+function startCandidates(r){
+  const out = [];
+  out.push({at_km:0, label:"Ursprung", name:"Wie berechnet", icon:"🏁", dist:0});
+  (r.rest_points || []).filter(p => p.kind === "parking" || p.kind === "bench")
+    .forEach(p => out.push({at_km:p.at_km, label:p.label, name:p.name,
+                            icon:REST_ICON[p.kind] || "📍"}));
+  (r.hotspots || []).forEach(id => {
+    const sp = SPOT_BY_ID[id];
+    if (!sp) return;
+    const at = nearestKmOnRoute(r, sp.lat, sp.lon);
+    if (at === null) return;
+    out.push({at_km:at, label:"Ort", name:sp.name, icon:CAT_ICON[sp.category] || "📍"});
+  });
+  myPoints.forEach(mp => {
+    const at = nearestKmOnRoute(r, mp.lat, mp.lon);
+    if (at !== null) out.push({at_km:at, label:"Eigener Punkt", name:mp.name,
+                               icon:(MY_KINDS.find(k => k.k === mp.kind) || {}).i || "📌"});
+  });
+  const seen = new Set();
+  return out.filter(o => {
+    const k = o.at_km.toFixed(2);
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  }).sort((a, b) => a.at_km - b.at_km);
+}
+
+function nearestKmOnRoute(r, lat, lon){
+  let acc = 0, bd = Infinity, bat = 0;
+  for (let i = 1; i < r.coords.length; i++){
+    const a = r.coords[i - 1], b = r.coords[i];
+    const seg = Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
+                           (b[1] - a[1]) * 110540);
+    const d = Math.hypot((a[0] - lon) * 111320 * Math.cos(lat * Math.PI / 180),
+                         (a[1] - lat) * 110540);
+    if (d < bd){ bd = d; bat = acc; }
+    acc += seg;
+  }
+  return bd > 250 ? null : Math.round(bat / 10) / 100;
+}
+
+function renderEdit(r){
+  const el = document.getElementById("panel-edit");
+  if (!el || !r) return;
+  if (!VARIANTS && r.variant_count > 0){
+    el.innerHTML = `<div class="empty">Streckenvarianten werden geladen…</div>`;
+    loadVariants().then(() => { if (activeBase) renderEdit(deriveRoute(activeBase)); });
+    return;
+  }
+  const c = customFor(r.id);
+  const base = activeBase;
+  const km = v => v.toFixed(2).replace(".", ",");
+
+  const vlist = variantsOf(base.id);
+  const variants = `
+    <div class="section-h">Streckenführung</div>
+    ${vlist.length ? `
+      <button class="opt-row ${c.variant === 0 ? "on" : ""}" data-var="0">
+        <span class="row-ico">①</span>
+        <span class="r-main"><span class="r-t">Standard</span>
+          <span class="r-d">${km(base.km)} km · ${base.ascent_m} Hm · ${base.duration}</span></span>
+      </button>
+      ${vlist.map((v, i) => `
+        <button class="opt-row ${c.variant === i + 1 ? "on" : ""}" data-var="${i + 1}">
+          <span class="row-ico">${["②","③","④"][i] || "◆"}</span>
+          <span class="r-main"><span class="r-t">Variante ${i + 1}</span>
+            <span class="r-d">${km(v.km)} km · ${v.ascent_m} Hm · ${v.duration}
+              ${v.lake_share >= .5 ? " · viel am Wasser" : ""}
+              ${v.shade_share >= .3 ? " · schattig" : ""}</span></span>
+        </button>`).join("")}
+      ${c.variant > 0 ? `<div class="hint-box">Für Varianten sind keine
+        Schattenzeiten berechnet — die gibt es nur für die Standardführung.</div>` : ""}`
+      : `<div class="hint-box">Für diese Länge gibt es im Wegenetz keine zweite
+         Führung, die sich wirklich unterscheidet.</div>`}`;
+
+  const cands = startCandidates(r);
+  const starts = `
+    <div class="section-h">Startpunkt</div>
+    <div class="hint-box">Die Runde wird so gedreht, dass sie hier beginnt und endet.
+      Länge und Höhenmeter bleiben gleich.</div>
+    ${cands.map(o => {
+      const d = Math.round(o.at_km * 1000);
+      const isOn = Math.abs((c.startDist || 0) - (o.dist === 0 ? 0 : d)) < 20;
+      return `<button class="opt-row ${isOn ? "on" : ""}" data-start="${o.dist === 0 ? 0 : d}">
+        <span class="row-ico">${o.icon}</span>
+        <span class="r-main"><span class="r-t">${o.name}</span>
+          <span class="r-d">${o.label}${o.dist === 0 ? "" : ` · bisher bei km ${km(o.at_km)}`}</span></span>
+        <span class="r-x">${isOn ? "AKTIV" : "START"}</span></button>`;
+    }).join("")}`;
+
+  const spurs = `
+    <div class="section-h">Abstecher</div>
+    ${(r.spurs && r.spurs.length) ? r.spurs.map(sp => {
+      const on = !!c.spurs[spurKey(sp)];
+      return `<button class="opt-row ${on ? "on" : ""}" data-spur="${spurKey(sp)}">
+        <span class="row-ico">${REST_ICON[sp.kind] || "📍"}</span>
+        <span class="r-main"><span class="r-t">${sp.name}</span>
+          <span class="r-d">Abzweig bei km ${km(sp.at_km)} · hin und zurück</span></span>
+        <span class="delta">+${sp.detour_m} m</span></button>`;
+    }).join("") : `<div class="hint-box">In Reichweite dieser Runde liegt nichts,
+      wofür sich ein Umweg über echte Wege lohnt.</div>`}`;
+
+  const mine = `
+    <div class="section-h">Eigene Punkte</div>
+    <div class="hint-box">OpenStreetMap kennt hier weder Wickelräume noch die WCs
+      am Bootshaus. Setz dir die Punkte selbst — sie bleiben auf diesem Gerät
+      gespeichert und lassen sich als Startpunkt wählen.</div>
+    <div class="addbar">${MY_KINDS.map(k =>
+      `<button class="chip" data-add="${k.k}">${k.i} ${k.t}</button>`).join("")}</div>
+    ${myPoints.length ? myPoints.map(mp => `
+      <div class="opt-row">
+        <span class="row-ico">${(MY_KINDS.find(k => k.k === mp.kind) || {}).i || "📌"}</span>
+        <span class="r-main"><span class="r-t">${mp.name}</span>
+          <span class="r-d">${mp.lat.toFixed(5)}, ${mp.lon.toFixed(5)}</span></span>
+        <button class="r-x" data-del="${mp.id}" style="color:var(--red)">LÖSCHEN</button>
+      </div>`).join("") : ""}`;
+
+  const reset = (c.variant || c.startDist || Object.keys(c.spurs).length)
+    ? `<button class="btn btn-ghost" id="btn-reset-custom" style="width:100%;margin-top:14px">
+         Anpassungen zurücksetzen</button>` : "";
+
+  el.innerHTML = variants + starts + spurs + mine + reset;
+
+  el.querySelectorAll("[data-var]").forEach(b => b.addEventListener("click", () => {
+    c.variant = +b.dataset.var; c.startDist = 0; refreshActive({fly:true});
+  }));
+  el.querySelectorAll("[data-start]").forEach(b => b.addEventListener("click", () => {
+    // die angezeigten Kilometer zaehlen ab dem aktuellen Start - fuer die
+    // Speicherung muss daraus wieder ein Wert auf der Originallinie werden
+    const pick = +b.dataset.start;
+    if (pick === 0){ c.startDist = 0; }
+    else {
+      const ringLen = lineLength(r.coords);
+      c.startDist = ((c.startDist || 0) + pick) % ringLen;
+    }
+    refreshActive({fly:true});
+  }));
+  el.querySelectorAll("[data-spur]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.spur;
+    if (c.spurs[k]) delete c.spurs[k]; else c.spurs[k] = 1;
+    refreshActive({});
+  }));
+  el.querySelectorAll("[data-add]").forEach(b => b.addEventListener("click", () => {
+    beginAddPoint(b.dataset.add);
+  }));
+  el.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => {
+    const i = myPoints.findIndex(x => x.id === b.dataset.del);
+    if (i >= 0){ myPoints.splice(i, 1); saveJSON("blindsee-points", myPoints);
+      renderMyMarkers(); refreshActive({}); }
+  }));
+  const rb = document.getElementById("btn-reset-custom");
+  if (rb) rb.addEventListener("click", () => {
+    custom[r.id] = {variant:0, startDist:0, spurs:{}}; refreshActive({fly:true});
+  });
+}
+
+/* ---- Eigene Punkte setzen ---- */
+let addKind = null, myMarkers = [];
+function beginAddPoint(kind){
+  addKind = kind;
+  map.getCanvas().classList.add("picking");
+  setSheet("peek");
+  const k = MY_KINDS.find(x => x.k === kind);
+  document.getElementById("sheet-sub").textContent =
+    `Tippe auf die Karte, um „${k ? k.t : kind}" zu setzen — nochmal tippen bricht ab`;
+}
+
+map.on("click", e => {
+  if (!addKind) return;
+  const k = MY_KINDS.find(x => x.k === addKind) || {t:"Punkt"};
+  const name = prompt(`Name für den Punkt (${k.t}):`, k.t);
+  map.getCanvas().classList.remove("picking");
+  if (name){
+    myPoints.push({id:"p" + Date.now(), kind:addKind, name:name,
+                   lat:e.lngLat.lat, lon:e.lngLat.lng});
+    saveJSON("blindsee-points", myPoints);
+    renderMyMarkers();
+  }
+  addKind = null;
+  refreshActive({});
+  setSheet("half");
+});
+
+function renderMyMarkers(){
+  myMarkers.forEach(m => m.remove());
+  myMarkers = myPoints.map(mp => {
+    const el = document.createElement("div");
+    const k = MY_KINDS.find(x => x.k === mp.kind) || {i:"📌"};
+    el.style.cssText = "width:28px;height:28px;border-radius:99px;background:rgba(22,27,34,.94);"+
+      "border:2px solid #d29922;display:grid;place-items:center;font-size:13px;"+
+      "box-shadow:0 3px 10px rgba(0,0,0,.5)";
+    el.textContent = k.i;
+    el.title = mp.name;
+    return new maplibregl.Marker({element:el}).setLngLat([mp.lon, mp.lat]).addTo(map);
+  });
 }
 
 /* ============================ Orte ============================ */
@@ -729,13 +1208,14 @@ function shadeMask(route, when){
    des naechstgelegenen Stuetzpunkts. */
 function shadeGeoJSON(route, mask){
   const step = route.shade.step_m;
+  const shift = route.shadeShift || 0;
   const feats = [];
   let dist = 0, run = [route.coords[0]], cur = null;
   for (let i = 1; i < route.coords.length; i++){
     const a = route.coords[i - 1], b = route.coords[i];
     const dx = (b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180);
     const dy = (b[1] - a[1]) * 110540;
-    const idx = Math.min(mask.length - 1, Math.round(dist / step));
+    const idx = ((Math.round((dist + shift) / step) % mask.length) + mask.length) % mask.length;
     const state = mask[idx];
     if (cur === null) cur = state;
     if (state !== cur){
@@ -816,8 +1296,27 @@ function paintShade(r){
    und Baeume hindurch. Stattdessen faehrt die Kamera jetzt auf der Runde
    selbst: Position und Blickrichtung kommen aus der Linie, die Neigung wird
    so weit zurueckgenommen, dass das Gelaende davor den Blick nicht schneidet. */
+let lastProg = -1;
 let tourOn = false, tourRoute = null, tourDist = 0, tourPlaying = false,
     tourLen = 0, tourCum = [], tourRaf = 0, tourLast = 0;
+
+/* Im Rundflug muss die Strecke aus ~200 m Entfernung und schraeg von oben
+   lesbar bleiben: breiter, heller, mit Richtungspfeilen. */
+function setTourLineStyle(on){
+  try {
+    map.setPaintProperty("route-line", "line-width", on ? 7 : 4);
+    map.setPaintProperty("route-glow", "line-width", on ? 20 : 11);
+    map.setPaintProperty("route-glow", "line-opacity", on ? .38 : .22);
+    map.setPaintProperty("route-dash", "line-width", on ? 2.4 : 1.6);
+    map.setPaintProperty("route-dash", "line-opacity", on ? .95 : .75);
+    map.setLayoutProperty("route-arrows", "visibility", on ? "visible" : "none");
+    if (!on){
+      map.setPaintProperty("route-line", "line-gradient", null);
+      map.setPaintProperty("route-line", "line-color", "#4aa8ff");
+      lastProg = -1;
+    }
+  } catch(e){}
+}
 
 function buildTourIndex(r){
   tourCum = [0];
@@ -861,7 +1360,7 @@ function clearPitch(lon, lat, bearing, zoom){
   const fovDeg = map.getVerticalFieldOfView ? map.getVerticalFieldOfView() : 36.87;
   const camPx = 0.5 * (map.getCanvas().clientHeight || 700) / Math.tan(fovDeg * Math.PI / 360);
   const groundZ = safeElev(lon, lat, 1100);
-  for (let pitch = 80; pitch >= 55; pitch -= 5){
+  for (let pitch = 74; pitch >= 50; pitch -= 4){
     const dist = camPx * metersPerPixel(lat, zoom);
     const camH = dist * Math.cos(pitch * Math.PI / 180);
     const back = dist * Math.sin(pitch * Math.PI / 180);
@@ -877,7 +1376,7 @@ function clearPitch(lon, lat, bearing, zoom){
     }
     if (ok) return pitch;
   }
-  return 55;
+  return 50;
 }
 
 function safeElev(lon, lat, fallback){
@@ -887,11 +1386,11 @@ function safeElev(lon, lat, fallback){
   } catch(e){ return fallback; }
 }
 
-let pitchCache = 72, pitchCheckedAt = -1e9, pitchCheckedDist = -1e9;
+let pitchCache = 68, pitchCheckedAt = -1e9, pitchCheckedDist = -1e9;
 
 function applyTourCamera(){
   if (!tourOn || !tourRoute) return;
-  const zoom = 18.4;
+  const zoom = 18.8;
   const p = pointAt(tourRoute, tourDist);
   const bear = bearingAt(tourRoute, tourDist);
   // Die Gelaendeabfrage kostet spuerbar, das Gelaende aendert sich aber nicht
@@ -911,6 +1410,23 @@ function applyTourCamera(){
   const cLat = p[1] + (ahead * Math.cos(rad)) / 110540;
   const cLon = p[0] + (ahead * Math.sin(rad)) / (111320 * Math.cos(p[1] * Math.PI / 180));
   map.jumpTo({center:[cLon, cLat], zoom:zoom, pitch:pitch, bearing:bear});
+
+  const posSrc = map.getSource("tourpos");
+  if (posSrc) posSrc.setData({type:"Feature", geometry:{type:"Point", coordinates:p},
+                              properties:{}});
+
+  // Zurueckgelegtes gedaempft, Strecke voraus kraeftig - nur nachfuehren wenn
+  // sich der Fortschritt spuerbar geaendert hat.
+  const prog = tourLen ? Math.min(0.999, Math.max(0.001, tourDist / tourLen)) : 0.001;
+  if (Math.abs(prog - lastProg) > 0.004){
+    lastProg = prog;
+    try {
+      map.setPaintProperty("route-line", "line-gradient",
+        ["interpolate", ["linear"], ["line-progress"],
+         0, "#2a4258", Math.max(0.001, prog - 0.004), "#2a4258",
+         prog, "#ffffff", Math.min(0.999, prog + 0.02), "#4aa8ff", 1, "#4aa8ff"]);
+    } catch(e){}
+  }
   document.getElementById("g-needle").style.transform = `rotate(${-bear}deg)`;
   document.getElementById("t-slider").value = String(Math.round(tourDist));
   document.getElementById("g-dir").textContent =
@@ -947,6 +1463,7 @@ async function enterTour(route, startDist){
   await tilesReady(3000);
 
   tourOn = true;
+  setTourLineStyle(true);
   map.dragPan.disable(); map.dragRotate.disable(); map.scrollZoom.disable();
   map.touchZoomRotate.disable(); map.keyboard.disable(); map.doubleClickZoom.disable();
   const sl = document.getElementById("t-slider");
@@ -963,6 +1480,9 @@ async function enterTour(route, startDist){
 
 function exitTour(){
   tourOn = false; tourPlaying = false;
+  setTourLineStyle(false);
+  const posSrc = map.getSource("tourpos");
+  if (posSrc) posSrc.setData(emptyFC());
   if (tourRaf) cancelAnimationFrame(tourRaf), tourRaf = 0;
   closePhoto();
   document.getElementById("ground").hidden = true;

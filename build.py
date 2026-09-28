@@ -79,6 +79,20 @@ def main():
         "ring": [[round(p[1], 6), round(p[0], 6)] for p in lake_ring],
     }
 
+    # Varianten liegen in einer eigenen Datei: sie werden erst gebraucht, wenn
+    # jemand die Streckenfuehrung aendern will, kosten aber ein Viertel der Daten.
+    variants = {}
+    for r in routes:
+        if r.get("variants"):
+            variants[r["id"]] = r["variants"]
+        r["variant_count"] = len(r.get("variants", []))
+        r.pop("variants", None)
+    vpath = os.path.join(HERE, "variants.json")
+    with open(vpath, "w", encoding="utf-8") as f:
+        json.dump(variants, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"[build] variants.json: {os.path.getsize(vpath)/1024:.0f} KB, "
+          f"{sum(len(v) for v in variants.values())} Varianten")
+
     data = {"routes": routes, "hotspots": hotspots, "lake": lake}
     tpl = open(os.path.join(HERE, "template.html"), encoding="utf-8").read()
     if "__DATA__" not in tpl:

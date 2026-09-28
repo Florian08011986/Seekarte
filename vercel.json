@@ -2,6 +2,12 @@
   "version": 2,
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!variants\\.json|.*\\.(?:json|png|jpg|svg|ico|webmanifest)).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/variants.json",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
+    }
   ]
 }

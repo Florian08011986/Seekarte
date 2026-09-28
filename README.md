@@ -27,8 +27,14 @@ Interaktive 3D-Karte mit **echten, berechneten Rundwegen** rund um den Blindsee 
   Begründung, Rastpunkte aus OSM auf der Karte, eine Zeitleiste mit allen
   Stellen zum Schieben und Tragen samt Kilometerangabe, größere Bedienflächen
   und ein auf zwei Fragen verkürzter Assistent.
+- **Runden anpassen.** Startpunkt frei wählbar (die Runde wird gedreht, Länge
+  bleibt gleich), alternative Streckenführungen wo das Wegenetz sie hergibt,
+  Abstecher zu lohnenden Zielen über echte Wege — und eigene Punkte (WC,
+  Wickelraum, Parkplatz, Bank), die sich auch als Startpunkt wählen lassen.
+- **Filterleiste** über Länge, Kinderwagen-Ampel und Eigenschaften (am Wasser,
+  Schatten, viele Bänke, viel zu sehen, flach) mit laufender Trefferzahl.
 - **Bedienung über ein Bottom-Sheet** in drei Stufen (Vorschau / halb / ganz)
-  mit den Reitern Runden · Orte · Details, plus Höhenprofil je Runde.
+  mit den Reitern Runden · Details · Anpassen · Orte, plus Höhenprofil je Runde.
 
 ## Die Runden
 
@@ -61,6 +67,7 @@ Strecke, an denen der Wagen getragen werden muss.
 | `hotspots.json` | die redaktionellen Ortsinhalte (Kosten, Zeiten, Regeln) |
 | `osm_cache.json` | zwischengespeicherte OSM-Daten, damit der Build offline läuft |
 | `dem_wide.asc` | Höhenmodell-Ausschnitt für Höhenmeter und Steigung |
+| `variants.json` | alternative Streckenführungen, wird erst beim Anpassen nachgeladen |
 
 ## Neu bauen
 
@@ -109,6 +116,10 @@ python3 -m http.server 8088   # dann http://127.0.0.1:8088/
   zwischen den Richtungen interpoliert.
 - Steigungswerte stammen aus einem ~30-m-Höhenmodell. Kurze Rampen können
   dadurch geglättet sein.
+- **Wickelräume sind in OSM hier nirgends erfasst**, und die beiden einzigen
+  WCs im Datensatz liegen rund 4 km südwestlich an keiner Runde. Solche Punkte
+  muss man sich selbst setzen; sie bleiben im Browser des Geräts.
+- Schattenzeiten gibt es nur für die Standardführung, nicht für Varianten.
 - Rastpunkte und WCs stammen aus OpenStreetMap und sind dort unvollständig:
   im Umkreis von 1,5 km um den See ist kein WC verzeichnet, obwohl es am
   Bootshaus welche geben soll.

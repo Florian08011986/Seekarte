@@ -490,9 +490,15 @@ def find_loops(osm, max_depth=8, frontier_cap=12000):
     return segs, found
 
 
-def pick_per_band(osm, found):
-    """Pro Laengenklasse den kompaktesten, seenaechsten Ring."""
-    best = {}
+def pick_per_band(osm, found, variants=3):
+    """
+    Pro Laengenklasse die besten Ringe.
+
+    Der erste ist der Vorschlag, die weiteren sind echte Alternativen mit
+    anderer Streckenfuehrung - dafuer muessen sie sich deutlich vom bereits
+    Gewaehlten unterscheiden, sonst bekommt man dreimal fast dasselbe.
+    """
+    ranked = collections.defaultdict(list)
     for length, iq, dmin, ring, shore in found.values():
         km = length / 1000.0
         for lo, hi, rid, name in LOOP_BANDS:
@@ -500,8 +506,20 @@ def pick_per_band(osm, found):
                 # Kompakte Form UND Naehe zum Wasser - beides macht eine Runde
                 # erst zu einer, die man auch gehen will.
                 score = 0.5 * iq + 0.5 * shore - dmin / 40000.0
-                if rid not in best or score > best[rid][0]:
-                    best[rid] = (score, length, iq, dmin, ring, name, shore)
+                ranked[rid].append((score, length, iq, dmin, ring, name, shore))
+
+    best = {}
+    for rid, items in ranked.items():
+        items.sort(key=lambda x: -x[0])
+        chosen = []
+        for it in items:
+            nodes_set = set(it[4])
+            if all(len(nodes_set & set(c[4])) / max(1, min(len(nodes_set), len(c[4]))) < 0.65
+                   for c in chosen):
+                chosen.append(it)
+            if len(chosen) >= variants:
+                break
+        best[rid] = chosen[0] + (chosen[1:],)
     return best
 
 
@@ -785,6 +803,108 @@ def difficulty(stats):
     return "Sportlich"
 
 
+def dijkstra_from(nodes, adj, sources, targets, max_m=1200.0):
+    """
+    Kuerzeste Wege von einer Menge Startknoten zu mehreren Zielen.
+
+    Wird fuer Abstecher gebraucht: von der Runde weg zu einem Punkt, der
+    nicht direkt am Weg liegt - und zwar ueber echte Wege, nicht Luftlinie.
+    """
+    import heapq
+    dist = {s: 0.0 for s in sources}
+    prev = {}
+    heap = [(0.0, s) for s in sources]
+    heapq.heapify(heap)
+    want = set(targets)
+    found = {}
+    while heap:
+        d, u = heapq.heappop(heap)
+        if d > dist.get(u, float("inf")):
+            continue
+        if u in want:
+            found[u] = d
+            want.discard(u)
+            if not want:
+                break
+        if d > max_m:
+            continue
+        for v in adj[u]:
+            nd = d + haversine(nodes[u], nodes[v])
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(heap, (nd, v))
+    return dist, prev, found
+
+
+def nearest_node(nodes, adj, lat, lon, max_m=120.0):
+    best, bd = None, max_m
+    for n in adj:
+        d = haversine(nodes[n], (lat, lon))
+        if d < bd:
+            bd, best = d, n
+    return best
+
+
+def build_spurs(osm, ring, pois, verbose=False):
+    """Abstecher von der Runde zu Punkten, die nicht direkt am Weg liegen."""
+    nodes, adj = osm["nodes"], osm["adj"]
+    on_route = set(ring)
+    pts = [nodes[n] for n in ring]
+
+    WORTH_A_DETOUR = {"wc", "water", "shelter", "picnic", "food", "view", "parking"}
+    cands = []
+    for poi in pois:
+        if poi["kind"] not in WORTH_A_DETOUR:
+            continue
+        d_line = dist_to_polyline((poi["lat"], poi["lon"]), pts)
+        if 45 < d_line <= 700:
+            nn = nearest_node(nodes, adj, poi["lat"], poi["lon"])
+            if nn is not None and nn not in on_route:
+                cands.append((poi, nn))
+    if not cands:
+        return []
+
+    dist, prev, found = dijkstra_from(nodes, adj, on_route, [c[1] for c in cands])
+    spurs = []
+    for poi, nn in cands:
+        if nn not in found:
+            continue
+        path, cur = [nn], nn
+        while cur in prev:
+            cur = prev[cur]
+            path.append(cur)
+            if cur in on_route:
+                break
+        if path[-1] not in on_route:
+            continue
+        path.reverse()
+        length = sum(haversine(nodes[a], nodes[b]) for a, b in zip(path, path[1:]))
+        if length < 10 or length > 900:
+            continue
+        # Position des Abzweigs auf der Runde
+        branch = path[0]
+        at_m = 0.0
+        acc = 0.0
+        for i in range(len(ring) - 1):
+            if ring[i] == branch:
+                at_m = acc
+                break
+            acc += haversine(nodes[ring[i]], nodes[ring[i + 1]])
+        spurs.append({
+            "kind": poi["kind"], "label": poi["label"], "name": poi["name"],
+            "lat": round(poi["lat"], 6), "lon": round(poi["lon"], 6),
+            "at_km": round(at_m / 1000.0, 2),
+            "detour_m": int(round(length * 2)),      # hin und zurueck
+            "coords": [[round(nodes[n][1], 5), round(nodes[n][0], 5)] for n in path],
+        })
+    spurs.sort(key=lambda x: x["detour_m"])
+    if verbose and spurs:
+        print("      Abstecher: " + ", ".join(
+            f"{x['label']} +{x['detour_m']} m" for x in spurs[:6]))
+    return spurs[:8]
+
+
 def build_routes(hotspots, verbose=False):
     """Hauptfunktion: liefert die fertige Routenliste fuer die Karte."""
     osm = load_osm()
@@ -800,14 +920,34 @@ def build_routes(hotspots, verbose=False):
             if verbose:
                 print(f"[route_engine] {name}: kein echter Ring in {lo}-{hi} km")
             continue
-        score, length, iq, dmin, ring, label, shore = picked[rid]
+        score, length, iq, dmin, ring, label, shore, alts = picked[rid]
         stats = enrich(osm, get_z, ring, hotspots)
+        stats["spurs"] = build_spurs(osm, ring, osm.get("pois", []), verbose)
         stats.update({
             "id": rid,
             "name": label,
             "compactness": round(iq, 2),
             "difficulty": difficulty(stats),
         })
+        # Alternative Streckenfuehrungen derselben Laengenklasse
+        stats["variants"] = []
+        for a in alts:
+            v = enrich(osm, get_z, a[4], hotspots)
+            stats["variants"].append({
+                "km": v["km"], "ascent_m": v["ascent_m"], "duration": v["duration"],
+                "lake_share": v["lake_share"], "shade_share": v["shade_share"],
+                "stroller_grade": v["stroller_grade"], "benches": v["benches"],
+                "hotspots": v["hotspots"], "coords": v["coords"],
+                "steep_sections": v["steep_sections"], "steps_at": v["steps_at"],
+                "rest_points": v["rest_points"], "stroller_notes": v["stroller_notes"],
+                "max_slope_pct": v["max_slope_pct"], "minutes": v["minutes"],
+                "profile": v["profile"], "highpoint_m": v["highpoint_m"],
+                "lowpoint_m": v["lowpoint_m"], "difficulty": difficulty(v),
+                "hotspot_detours": v["hotspot_detours"], "steep_share": v["steep_share"],
+                "steps_m": v["steps_m"], "surface_quality": v["surface_quality"],
+                "descent_m": v["descent_m"], "dog_ok": v["dog_ok"],
+                "stroller_ok": v["stroller_ok"], "push_m": v["push_m"],
+            })
         routes.append(stats)
         if verbose:
             print(
@@ -818,7 +958,8 @@ def build_routes(hotspots, verbose=False):
                 f"Schatten {stats['shade_share']:.2f}  "
                 f"Wagen:{stats['stroller_grade']:6s}  "
                 f"Hotspots {len(stats['hotspots'])}  "
-            f"Baenke {stats['benches']}  Schiebestellen {len(stats['steep_sections'])}"
+            f"Baenke {stats['benches']}  Schiebestellen {len(stats['steep_sections'])}  "
+            f"Varianten {len(stats['variants'])}"
             )
     routes.sort(key=lambda r: r["km"])
     return routes
