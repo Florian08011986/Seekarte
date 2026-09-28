@@ -106,6 +106,48 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
   letter-spacing:.07em;margin:16px 0 8px}
 .empty{padding:26px 14px;text-align:center;color:var(--faint);font-size:12.5px;line-height:1.6}
 
+/* ---------- Kinderwagen-Modus ---------- */
+.ampel{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;
+  padding:3px 9px;border-radius:7px;border:1px solid var(--line);background:#0f151c}
+.ampel::before{content:"";width:8px;height:8px;border-radius:99px;flex:none}
+.ampel.green{color:var(--green);border-color:rgba(63,185,80,.35)}
+.ampel.green::before{background:var(--green)}
+.ampel.yellow{color:var(--amber);border-color:rgba(210,153,34,.35)}
+.ampel.yellow::before{background:var(--amber)}
+.ampel.red{color:var(--red);border-color:rgba(248,81,73,.35)}
+.ampel.red::before{background:var(--red)}
+.kw-note{font-size:12px;line-height:1.5;color:var(--muted);margin-top:7px}
+
+.tl{margin-top:8px;border-left:2px solid var(--line);padding-left:12px}
+.tl-item{position:relative;padding:7px 0;font-size:12.5px;line-height:1.45}
+.tl-item::before{content:"";position:absolute;left:-17px;top:13px;width:8px;height:8px;
+  border-radius:99px;background:var(--line);border:2px solid var(--surface-2)}
+.tl-item.warn::before{background:var(--amber)}
+.tl-item.bad::before{background:var(--red)}
+.tl-item.good::before{background:var(--green)}
+.tl-km{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent);margin-right:7px}
+.tl-item b{font-weight:650}
+
+.kw-toggle{position:relative}
+.kw-toggle[aria-pressed="true"]{background:var(--accent);color:#06121f;border-color:var(--accent)}
+
+/* Vereinfachte Bedienung: groessere Flaechen, weniger Gedraengtes */
+body.kw .card{padding:16px 16px;border-radius:18px}
+body.kw .card-name{font-size:16px}
+body.kw .card-km{font-size:15px}
+body.kw .card-desc{font-size:13.5px}
+body.kw .row{padding:14px 13px}
+body.kw .row-name{font-size:14.5px}
+body.kw .row-sub{font-size:12.5px}
+body.kw .tab{height:40px;font-size:14px}
+body.kw .pill{font-size:12px;padding:4px 10px}
+body.kw .opt{padding:16px 15px}
+body.kw .opt-t{font-size:15.5px}
+body.kw .opt-d{font-size:12.5px}
+body.kw .btn{height:50px;font-size:15px}
+body.kw .stat-v{font-size:16px}
+body.kw .sheet-title{font-size:16.5px}
+
 /* ---------- Wizard ---------- */
 .overlay{position:fixed;inset:0;z-index:60;background:rgba(9,12,16,.93);
   backdrop-filter:blur(14px);display:flex;align-items:flex-end;justify-content:center}
@@ -199,6 +241,8 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
 <header class="topbar">
   <div class="brand">Blindsee<small id="brand-sub">Tirol · 1093 m</small></div>
   <button class="cta" id="open-wizard">Tour finden</button>
+  <button class="icon-btn kw-toggle" id="btn-kw" aria-pressed="false"
+          title="Kinderwagen-Modus">👶</button>
   <button class="icon-btn" id="btn-reset" title="Übersicht">⌂</button>
 </header>
 
@@ -297,6 +341,16 @@ map.touchZoomRotate.enableRotation();
 
 let activeRoute = null, activeSpot = null;
 
+/* Kinderwagen-Modus: blendet Rastpunkte ein, vergroessert die Bedienflaechen
+   und stellt ueberall die Kinderwagen-Ampel in den Vordergrund. */
+let kwMode = false;
+try { kwMode = localStorage.getItem("blindsee-kw") === "1"; } catch(e){}
+
+const AMPEL_TEXT = {green:"Kinderwagen: problemlos", yellow:"Kinderwagen: machbar",
+                    red:"Kinderwagen: schwierig"};
+const REST_ICON = {bench:"🪑", waste:"🗑", wc:"🚻", water:"🚰", shelter:"⛺",
+                   parking:"🅿️", food:"🍽", picnic:"🧺", view:"🔭"};
+
 map.on("load", () => {
   // Himmel + Dunst: erst dadurch entsteht in der Bodenansicht ein echter
   // Horizont statt einer abgeschnittenen Gelaendekante.
@@ -315,6 +369,15 @@ map.on("load", () => {
     layout:{"line-cap":"round","line-join":"round"},
     paint:{"line-color":"#eaf4ff","line-width":1.6,"line-dasharray":[1.5,2.5],"line-opacity":.75}});
 
+  map.addSource("rest", {type:"geojson", data:emptyFC()});
+  map.addLayer({id:"rest-halo", type:"circle", source:"rest",
+    paint:{"circle-radius":11,"circle-color":"#3fb950","circle-opacity":.18}});
+  map.addLayer({id:"rest-dot", type:"circle", source:"rest",
+    paint:{"circle-radius":5,"circle-color":"#3fb950","circle-stroke-width":1.5,
+           "circle-stroke-color":"#0d1117"}});
+
+  document.getElementById("btn-kw").setAttribute("aria-pressed", String(kwMode));
+  document.body.classList.toggle("kw", kwMode);
   renderRoutes(); renderSpots(); addSpotMarkers();
   selectRoute(ROUTES.find(r => r.id === "see") || ROUTES[0], {fly:true});
 });
@@ -336,6 +399,16 @@ function addSpotMarkers(){
   });
 }
 
+function renderRest(r){
+  const src = map.getSource("rest");
+  if (!src) return;
+  if (!kwMode || !r){ src.setData(emptyFC()); return; }
+  src.setData({type:"FeatureCollection", features:(r.rest_points || []).map(p => ({
+    type:"Feature", geometry:{type:"Point", coordinates:[p.lon, p.lat]},
+    properties:{kind:p.kind}
+  }))});
+}
+
 function highlightSpots(ids){
   const set = new Set(ids || []);
   SPOTS.forEach(s => {
@@ -349,10 +422,12 @@ function highlightSpots(ids){
 /* ============================ Runden ============================ */
 function routePills(r){
   const p = [];
+  if (kwMode) p.push(`<span class="ampel ${r.stroller_grade}">${AMPEL_TEXT[r.stroller_grade]}</span>`);
   p.push(`<span class="pill">${r.ascent_m} Hm</span>`);
   p.push(`<span class="pill">${r.duration}</span>`);
   p.push(`<span class="pill ${r.difficulty === "Leicht" ? "ok" : r.difficulty === "Sportlich" ? "warn" : ""}">${r.difficulty}</span>`);
-  if (r.stroller_ok) p.push(`<span class="pill ok">Kinderwagen</span>`);
+  if (!kwMode && r.stroller_ok) p.push(`<span class="pill ok">Kinderwagen</span>`);
+  if (kwMode && r.benches) p.push(`<span class="pill ok">${r.benches} Bänke</span>`);
   if (r.lake_share >= .5) p.push(`<span class="pill hot">${Math.round(r.lake_share*100)} % am Wasser</span>`);
   if (r.shade_share >= .35) p.push(`<span class="pill ok">${Math.round(r.shade_share*100)} % Schatten</span>`);
   if (r.hotspots.length) p.push(`<span class="pill">${r.hotspots.length} Orte</span>`);
@@ -370,7 +445,9 @@ function renderRoutes(list, reasons){
         <span class="card-km">${r.km.toFixed(2).replace(".", ",")} km</span>
       </div>
       <div class="card-meta">${routePills(r)}</div>
-      <div class="card-desc">${r.desc}</div>
+      <div class="card-desc">${kwMode && r.desc_kw ? r.desc_kw : r.desc}</div>
+      ${kwMode && r.stroller_notes.length
+        ? `<div class="kw-note">${r.stroller_notes.join(" · ")}</div>` : ""}
       ${reasons && reasons[r.id] ? `<div class="why">${reasons[r.id]}</div>` : ""}
     </div>`).join("");
   el.querySelectorAll("[data-route]").forEach(c =>
@@ -383,6 +460,7 @@ function selectRoute(r, opt){
   const src = map.getSource("route");
   if (src) src.setData({type:"Feature", geometry:{type:"LineString", coordinates:r.coords}, properties:{}});
   highlightSpots(r.hotspots);
+  renderRest(r);
   document.getElementById("sheet-title").textContent = r.name;
   document.getElementById("sheet-sub").textContent =
     `${r.km.toFixed(2).replace(".", ",")} km Runde · ${r.ascent_m} Hm · ${r.duration}`;
@@ -412,6 +490,7 @@ function renderDetail(r){
     <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:2px">
       <span>${r.lowpoint_m} m</span><span>${r.highpoint_m} m</span>
     </div>
+    ${kwMode ? kwSection(r) : ""}
     <div class="section-h">Beschaffenheit</div>
     <div class="card-meta">${routePills(r)}</div>
     <div class="card-desc">${r.desc}</div>
@@ -427,6 +506,48 @@ function renderDetail(r){
   drawProfile(r);
   el.querySelectorAll("[data-spot]").forEach(row =>
     row.addEventListener("click", () => openSpot(SPOT_BY_ID[row.dataset.spot])));
+}
+
+/* Was auf der Runde mit dem Wagen wirklich auf einen zukommt - der Reihe nach,
+   damit man weiss wann getragen wird und wo eine Bank zum Pausieren steht. */
+function kwSection(r){
+  const items = [];
+  (r.steps_at || []).forEach(x => items.push({at:x.at_km, cls:"bad",
+    txt:`<b>Treppen (${x.length_m} m)</b> — Wagen tragen`}));
+  (r.steep_sections || []).forEach(x => items.push({at:x.at_km, cls:"warn",
+    txt:`<b>Steigung bis ${String(x.slope_pct).replace(".", ",")} %</b> über ${x.length_m} m — schieben`}));
+
+  // Baenke die dicht beieinanderstehen als einen Rastplatz zusammenfassen
+  const benches = (r.rest_points || []).filter(p => p.kind === "bench");
+  let group = [];
+  const flush = () => {
+    if (!group.length) return;
+    const n = group.length;
+    items.push({at:group[0].at_km, cls:"good",
+      txt:n > 1 ? `<b>Rastplatz</b> — ${n} Bänke beieinander` : `<b>Bank</b> zum Pausieren`});
+    group = [];
+  };
+  benches.forEach(b => {
+    if (group.length && b.at_km - group[group.length - 1].at_km > 0.15) flush();
+    group.push(b);
+  });
+  flush();
+
+  (r.rest_points || []).filter(p => p.kind !== "bench" && p.kind !== "waste")
+    .forEach(p => items.push({at:p.at_km, cls:"", txt:`<b>${p.label}</b>`}));
+
+  items.sort((a, b) => a.at - b.at);
+  const km = v => String(v.toFixed(1)).replace(".", ",");
+  const wc = (r.rest_points || []).some(p => p.kind === "wc");
+
+  return `<div class="section-h">Mit Kinderwagen</div>
+    <span class="ampel ${r.stroller_grade}">${AMPEL_TEXT[r.stroller_grade]}</span>
+    <div class="kw-note">${r.stroller_notes.join(" · ")}</div>
+    ${!wc ? `<div class="kw-note">Kein WC direkt an der Strecke verzeichnet —
+      am besten vorher am Parkplatz einplanen.</div>` : ""}
+    ${items.length ? `<div class="tl">${items.map(i =>
+      `<div class="tl-item ${i.cls}"><span class="tl-km">km ${km(i.at)}</span>${i.txt}</div>`
+    ).join("")}</div>` : `<div class="kw-note">Keine besonderen Stellen verzeichnet.</div>`}`;
 }
 
 function drawProfile(r){
@@ -696,6 +817,27 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   window.addEventListener("mouseup", e => { if (dragging) end(e); });
 })();
 
+document.getElementById("btn-kw").addEventListener("click", () => {
+  kwMode = !kwMode;
+  try { localStorage.setItem("blindsee-kw", kwMode ? "1" : "0"); } catch(e){}
+  document.getElementById("btn-kw").setAttribute("aria-pressed", String(kwMode));
+  document.body.classList.toggle("kw", kwMode);
+  document.getElementById("sheet-sub").textContent = kwMode
+    ? "Kinderwagen-Modus: Rastpunkte und Schiebestellen werden angezeigt"
+    : "Alle Touren sind Runden — Start = Ziel";
+  // Im Kinderwagen-Modus die unproblematischste Runde nach vorn holen
+  if (kwMode){
+    const best = ROUTES.filter(r => r.stroller_grade !== "red")
+                       .sort((a, b) => (a.stroller_grade === "green" ? -1 : 1) - (b.stroller_grade === "green" ? -1 : 1))[0];
+    renderRoutes();
+    selectRoute(best || activeRoute || ROUTES[0], {fly:true});
+  } else {
+    renderRoutes();
+    selectRoute(activeRoute || ROUTES[0], {fly:false});
+  }
+  if (sheet.dataset.state === "peek") setSheet("half");
+});
+
 document.getElementById("btn-reset").addEventListener("click", () => {
   if (groundOn) exitGround();
   activeSpot = null; showTab("routes"); setSheet("half");
@@ -753,9 +895,19 @@ const QUESTIONS = [
 ];
 
 let wizStep = 0;
+let QS = QUESTIONS;
 const answers = {size:null, who:null, slope:null, want:[]};
 
 function openWizard(){
+  // Mit Kinderwagen stehen Begleitung und Steigungstoleranz bereits fest -
+  // zwei Fragen weniger statt vier Mal dasselbe zu beantworten.
+  if (kwMode){
+    answers.who = "stroller";
+    answers.slope = "flat";
+    QS = QUESTIONS.filter(q => q.key !== "who" && q.key !== "slope");
+  } else {
+    QS = QUESTIONS;
+  }
   wizStep = 0;
   document.getElementById("wizard").hidden = false;
   drawWizard();
@@ -763,14 +915,14 @@ function openWizard(){
 function closeWizard(){ document.getElementById("wizard").hidden = true; }
 
 function drawWizard(){
-  const q = QUESTIONS[wizStep];
-  document.getElementById("wiz-no").textContent = `Schritt ${wizStep + 1} von ${QUESTIONS.length}`;
+  const q = QS[wizStep];
+  document.getElementById("wiz-no").textContent = `Schritt ${wizStep + 1} von ${QS.length}`;
   document.getElementById("wiz-q").textContent = q.q;
   document.getElementById("wiz-hint").textContent = q.hint;
-  document.getElementById("wiz-bar").style.width = ((wizStep + 1) / QUESTIONS.length * 100) + "%";
+  document.getElementById("wiz-bar").style.width = ((wizStep + 1) / QS.length * 100) + "%";
   document.getElementById("wiz-back").style.visibility = wizStep === 0 ? "hidden" : "visible";
   document.getElementById("wiz-next").textContent =
-    wizStep === QUESTIONS.length - 1 ? "Runde vorschlagen" : "Weiter";
+    wizStep === QS.length - 1 ? "Runde vorschlagen" : "Weiter";
 
   const cur = answers[q.key];
   document.getElementById("wiz-body").innerHTML = q.options.map(o => {
@@ -797,14 +949,14 @@ function drawWizard(){
 }
 
 function updateNext(){
-  const q = QUESTIONS[wizStep];
+  const q = QS[wizStep];
   const cur = answers[q.key];
   const ok = q.multi ? true : !!cur;
   document.getElementById("wiz-next").disabled = !ok;
 }
 
 document.getElementById("wiz-next").addEventListener("click", () => {
-  if (wizStep < QUESTIONS.length - 1){ wizStep++; drawWizard(); }
+  if (wizStep < QS.length - 1){ wizStep++; drawWizard(); }
   else { closeWizard(); applyWizard(); }
 });
 document.getElementById("wiz-back").addEventListener("click", () => {
@@ -825,8 +977,9 @@ function scoreRoutes(){
     const reasons = [], blockers = [];
 
     // Harte Anforderungen
-    if (answers.who === "stroller" && !r.stroller_ok)
-      blockers.push("nicht kinderwagentauglich");
+    if (answers.who === "stroller" && r.stroller_grade === "red")
+      blockers.push(r.steps_m > 0 ? "Treppen — Wagen muss getragen werden"
+                                  : "zu lange steile Abschnitte");
     if (answers.who === "kids" && (r.km > 4.5 || r.steep_share > 0.14))
       blockers.push("für kleine Kinder zu lang oder zu steil");
     if (answers.who === "dog" && !r.dog_ok)
@@ -855,8 +1008,17 @@ function scoreRoutes(){
     }
 
     // Begleitung
-    if (answers.who === "stroller" && r.stroller_ok){
-      score += 16; reasons.push("kinderwagentauglich: keine Stufen, fester Belag");
+    if (answers.who === "stroller"){
+      if (r.stroller_grade === "green"){
+        score += 18; reasons.push("mit Kinderwagen problemlos: fester Belag, keine Stufen");
+      } else if (r.stroller_grade === "yellow"){
+        score += 8; reasons.push("mit geländegängigem Wagen machbar");
+      }
+      if (r.benches >= 2){
+        score += Math.min(10, r.benches * 2);
+        reasons.push(`${r.benches} Bänke zum Pausieren unterwegs`);
+      }
+      score += r.shade_share * 12;
     }
     if (answers.who === "kids"){
       score += Math.max(0, 14 - r.km * 2);

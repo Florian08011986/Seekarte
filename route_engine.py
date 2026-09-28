@@ -232,6 +232,33 @@ def load_osm():
     else:
         lake_center = (47.36269, 10.84931)
 
+    # Rast- und Versorgungspunkte. Fuer einen Ausflug mit Kinderwagen sind
+    # Baenke die eigentliche Planungsgroesse - davon gibt es rund um den See
+    # deutlich mehr als markierte Sehenswuerdigkeiten.
+    POI_KINDS = {
+        ("amenity", "bench"):          ("bench", "Bank"),
+        ("amenity", "waste_basket"):   ("waste", "Abfalleimer"),
+        ("amenity", "toilets"):        ("wc", "WC"),
+        ("amenity", "drinking_water"): ("water", "Trinkwasser"),
+        ("amenity", "shelter"):        ("shelter", "Unterstand"),
+        ("amenity", "parking"):        ("parking", "Parkplatz"),
+        ("amenity", "restaurant"):     ("food", "Einkehr"),
+        ("tourism", "picnic_site"):    ("picnic", "Rastplatz"),
+        ("tourism", "viewpoint"):      ("view", "Aussichtspunkt"),
+        ("leisure", "picnic_table"):   ("picnic", "Rastplatz"),
+    }
+    pois = []
+    for e in els:
+        if e["type"] != "node":
+            continue
+        tags = e.get("tags") or {}
+        for (k, v), (kind, label) in POI_KINDS.items():
+            if tags.get(k) == v:
+                pois.append({"kind": kind, "label": label,
+                             "name": tags.get("name") or label,
+                             "lat": e["lat"], "lon": e["lon"]})
+                break
+
     # Waldflaechen fuer den Schattenanteil
     forests = []
     for w in ways:
@@ -251,6 +278,7 @@ def load_osm():
         "lake_name": lake_name,
         "lake_center": lake_center,
         "lake_grid": build_lake_grid(lake_ring),
+        "pois": pois,
         "forests": forests,
     }
 
@@ -554,11 +582,18 @@ def enrich(osm, get_z, ring, hotspots):
     edge_tags = osm["edge_tags"]
     good = bad = 0.0
     steps_m = 0.0
+    steps_at = []
     for i in range(len(ring) - 1):
         tags = edge_tags.get(frozenset((ring[i], ring[i + 1])), {})
         d = seg_lengths[i] if i < len(seg_lengths) else 0
         if tags.get("highway") == "steps":
             steps_m += d
+            # Position merken: mit Kinderwagen ist entscheidend, WO getragen
+            # werden muss, nicht nur dass es Treppen gibt.
+            if steps_at and cum[i] - steps_at[-1]["to_m"] < 30:
+                steps_at[-1]["to_m"] = cum[i] + d
+            else:
+                steps_at.append({"at_m": cum[i], "to_m": cum[i] + d})
         surface = tags.get("surface")
         tracktype = tags.get("tracktype")
         if surface in GOOD_SURFACE or tracktype in ("grade1", "grade2"):
@@ -586,6 +621,47 @@ def enrich(osm, get_z, ring, hotspots):
                     break
     shade_share = shaded / total if total else 0.0
 
+    # Steile Abschnitte zusammenhaengend erfassen: mit Kinderwagen zaehlt
+    # nicht der Spitzenwert, sondern wo und wie lang geschoben werden muss.
+    steep_sections = []
+    run_start = None
+    for i, sl in enumerate(slopes):
+        if sl > 10.0 and run_start is None:
+            run_start = i
+        elif sl <= 10.0 and run_start is not None:
+            length = (i - run_start) * seg_d
+            if length >= 40:
+                steep_sections.append({
+                    "at_km": round(run_start * seg_d / 1000.0, 2),
+                    "length_m": int(round(length)),
+                    "slope_pct": round(max(slopes[run_start:i]), 1),
+                })
+            run_start = None
+    if run_start is not None:
+        length = (len(slopes) - run_start) * seg_d
+        if length >= 40:
+            steep_sections.append({
+                "at_km": round(run_start * seg_d / 1000.0, 2),
+                "length_m": int(round(length)),
+                "slope_pct": round(max(slopes[run_start:]), 1),
+            })
+
+    # Rastpunkte entlang der Runde, mit Position ab Start
+    rest = []
+    for poi in osm.get("pois", []):
+        best_d, best_at = float("inf"), 0.0
+        for i, p in enumerate(pts[:-1]):
+            dd = haversine((poi["lat"], poi["lon"]), p)
+            if dd < best_d:
+                best_d, best_at = dd, cum[i]
+        if best_d <= 45:
+            rest.append({
+                "kind": poi["kind"], "label": poi["label"], "name": poi["name"],
+                "lat": round(poi["lat"], 6), "lon": round(poi["lon"], 6),
+                "at_km": round(best_at / 1000.0, 2), "off_m": int(round(best_d)),
+            })
+    rest.sort(key=lambda r: r["at_km"])
+
     # Angebundene Hotspots
     on_route = []
     for hs in hotspots:
@@ -594,12 +670,38 @@ def enrich(osm, get_z, ring, hotspots):
             on_route.append({"id": hs["id"], "detour_m": round(d)})
     on_route.sort(key=lambda h: h["detour_m"])
 
-    stroller_ok = (
-        steps_m < 1
-        and steep_share < 0.08
-        and surface_quality > 0.45
-        and (ascent / (total / 1000.0)) < 60
-    )
+    # Kinderwagen-Ampel statt Ja/Nein: die schoenste Runde am Ufer faellt sonst
+    # allein wegen naturbelassenem Untergrund durch, obwohl sie mit einem
+    # gelaendegaengigen Wagen gut machbar ist. Die Ampel sagt, WAS einen erwartet.
+    push_m = sum(x["length_m"] for x in steep_sections)
+    hard_push = [x for x in steep_sections if x["slope_pct"] > 15 and x["length_m"] > 120]
+    stroller_notes = []
+    if steps_m >= 1:
+        stroller_grade = "red"
+        where = ", ".join(f"km {x['at_m']/1000:.1f}".replace(".", ",") for x in steps_at)
+        stroller_notes.append(
+            f"{int(steps_m)} m Treppen ({where}) — Wagen muss getragen werden")
+    elif steep_share > 0.18 or hard_push:
+        stroller_grade = "red"
+        stroller_notes.append("zu lange steile Abschnitte zum Schieben")
+    elif surface_quality > 0.70 and steep_share < 0.06:
+        stroller_grade = "green"
+        if steep_sections:
+            n = len(steep_sections)
+            stroller_notes.append(
+                f"befestigter Untergrund, keine Stufen — "
+                f"{n} kurze Rampe{'n' if n != 1 else ''} ({push_m} m), sonst flach")
+        else:
+            stroller_notes.append("befestigter Untergrund, keine Stufen, durchgehend flach")
+    else:
+        stroller_grade = "yellow"
+        if surface_quality <= 0.70:
+            stroller_notes.append("naturbelassener Weg — geländegängiger Wagen sinnvoll")
+        if push_m > 0:
+            stroller_notes.append(
+                f"{len(steep_sections)} Stelle{'n' if len(steep_sections) != 1 else ''} "
+                f"zum Schieben, zusammen {push_m} m")
+    stroller_ok = stroller_grade == "green"
     dog_ok = steps_m < 40
 
     # Gehzeit nach DIN 33466 / SAC: 4 km/h horizontal, 300 Hm/h Aufstieg
@@ -613,6 +715,8 @@ def enrich(osm, get_z, ring, hotspots):
         "max_slope_pct": round(max_slope, 1),
         "steep_share": round(steep_share, 2),
         "steps_m": int(round(steps_m)),
+        "steps_at": [{"at_km": round(x["at_m"] / 1000.0, 2),
+                      "length_m": int(round(x["to_m"] - x["at_m"]))} for x in steps_at],
         "surface_quality": round(surface_quality, 2),
         "lake_share": round(lake_share, 2),
         "shade_share": round(shade_share, 2),
@@ -624,6 +728,12 @@ def enrich(osm, get_z, ring, hotspots):
         "lowpoint_m": int(round(min(smooth))),
         "profile": [round(prof[i * len(prof) // 60 if len(prof) > 60 else i], 1)
                     for i in range(min(60, len(prof)))],
+        "stroller_grade": stroller_grade,
+        "stroller_notes": stroller_notes,
+        "push_m": push_m,
+        "steep_sections": steep_sections,
+        "rest_points": rest,
+        "benches": sum(1 for r in rest if r["kind"] == "bench"),
         "hotspots": [h["id"] for h in on_route],
         "hotspot_detours": {h["id"]: h["detour_m"] for h in on_route},
         "coords": [[round(p[1], 6), round(p[0], 6)] for p in pts],
@@ -671,8 +781,9 @@ def build_routes(hotspots, verbose=False):
                 f"steil {stats['steep_share']:.2f}  "
             f"Belag {stats['surface_quality']:.2f}  Ufer {stats['lake_share']:.2f}  "
                 f"Schatten {stats['shade_share']:.2f}  "
-                f"{'Kinderwagen' if stats['stroller_ok'] else 'kein Kinderwagen'}  "
-                f"Hotspots {len(stats['hotspots'])}"
+                f"Wagen:{stats['stroller_grade']:6s}  "
+                f"Hotspots {len(stats['hotspots'])}  "
+            f"Baenke {stats['benches']}  Schiebestellen {len(stats['steep_sections'])}"
             )
     routes.sort(key=lambda r: r["km"])
     return routes

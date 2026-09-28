@@ -17,6 +17,10 @@ Interaktive 3D-Karte mit **echten, berechneten Rundwegen** rund um den Blindsee 
 - **Vor-Ort-Ansicht in 3D.** Die Kamera wird auf Geländehöhe an den Ort gesetzt;
   per Ziehen schaut man sich um. Wo offene Bodenfotos existieren
   ([Panoramax](https://panoramax.xyz)), gibt es zusätzlich das echte Foto.
+- **Kinderwagen-Modus** (👶 in der Kopfzeile): Kinderwagen-Ampel je Runde mit
+  Begründung, Rastpunkte aus OSM auf der Karte, eine Zeitleiste mit allen
+  Stellen zum Schieben und Tragen samt Kilometerangabe, größere Bedienflächen
+  und ein auf zwei Fragen verkürzter Assistent.
 - **Bedienung über ein Bottom-Sheet** in drei Stufen (Vorschau / halb / ganz)
   mit den Reitern Runden · Orte · Details, plus Höhenprofil je Runde.
 
@@ -24,13 +28,18 @@ Interaktive 3D-Karte mit **echten, berechneten Rundwegen** rund um den Blindsee 
 
 Berechnet aus dem OpenStreetMap-Wegenetz; die Werte erzeugt `route_engine.py`:
 
-| Runde | Länge | Höhenmeter | Am Ufer | Schatten | Kinderwagen |
-|---|---|---|---|---|---|
-| Kleine Uferrunde | 1,41 km | 22 Hm | 77 % | – | ✅ |
-| Kurze Waldrunde | 2,13 km | 55 Hm | – | 63 % | ✅ |
-| Seeumrundung | 3,64 km | 66 Hm | 100 % | – | – |
-| Große Runde | 5,94 km | 135 Hm | 58 % | – | – |
-| Panorama-Runde | 7,78 km | 231 Hm | 34 % | – | – |
+| Runde | Länge | Höhenmeter | Am Ufer | Schatten | Bänke | Kinderwagen |
+|---|---|---|---|---|---|---|
+| Kleine Uferrunde | 1,41 km | 22 Hm | 77 % | – | 1 | 🟢 problemlos |
+| Kurze Waldrunde | 2,13 km | 55 Hm | – | 63 % | 0 | 🟡 machbar |
+| Seeumrundung | 3,64 km | 66 Hm | 100 % | – | 7 | 🔴 Treppen |
+| Große Runde | 5,94 km | 135 Hm | 58 % | – | 7 | 🔴 Treppen |
+| Panorama-Runde | 7,78 km | 231 Hm | 34 % | – | 15 | 🔴 Treppen |
+
+Die Kinderwagen-Ampel ist bewusst dreistufig: Ein Ja/Nein hätte die schönste
+Runde am Ufer allein wegen des naturbelassenen Untergrunds aussortiert. Rot
+steht hier nicht für „zu steil", sondern für die 16 m Treppen auf halber
+Strecke, an denen der Wagen getragen werden muss.
 
 ## Aufbau
 
@@ -70,7 +79,9 @@ python3 -m http.server 8088   # dann http://127.0.0.1:8088/
 3. Fundamentalzyklen über einen Spannbaum bestimmen
 4. Benachbarte Zyklen per XOR zu größeren Ringen kombinieren
 5. Pro Längenklasse den Ring wählen, der kompakt **und** nah am Wasser ist
-6. Mit echten Kennzahlen anreichern: Höhenprofil aus dem DEM (bilinear
+6. Rastpunkte (Bänke, WC, Trinkwasser, Unterstände) und zusammenhängende
+   Steigungs- und Treppenabschnitte mit Position ab Start zuordnen
+7. Mit echten Kennzahlen anreichern: Höhenprofil aus dem DEM (bilinear
    interpoliert, auf 50-m-Schritte resampelt), Belag und Treppen aus den
    OSM-Tags, Schattenanteil aus Waldflächen, Uferanteil aus einem
    vorberechneten Abstandsraster
@@ -85,6 +96,9 @@ python3 -m http.server 8088   # dann http://127.0.0.1:8088/
   exakt auf Augenhöhe.
 - Steigungswerte stammen aus einem ~30-m-Höhenmodell. Kurze Rampen können
   dadurch geglättet sein.
+- Rastpunkte und WCs stammen aus OpenStreetMap und sind dort unvollständig:
+  im Umkreis von 1,5 km um den See ist kein WC verzeichnet, obwohl es am
+  Bootshaus welche geben soll.
 - Die Wegequalität hängt an den OSM-Tags. Wo `surface` fehlt, wird neutral
   bewertet — die Kinderwagen-Einstufung ist ein Anhaltspunkt, keine Garantie.
 

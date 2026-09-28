@@ -29,6 +29,29 @@ DESCRIPTIONS = {
              "Alpin, aussichtsreich und deutlich anspruchsvoller.",
 }
 
+# Zweite Textfassung fuer den Kinderwagen-Modus. Beschreibt, was der Ausflug
+# mit Wagen praktisch bedeutet - die Zahlen dahinter kommen aus route_engine.
+DESCRIPTIONS_KW = {
+    "mini":  "Die unkomplizierteste Runde: fester Untergrund, keine Stufen, "
+             "in einer knappen halben Stunde zu schaffen. Zwei kurze Rampen "
+             "gleich am Anfang und nach 600 m, sonst durchgehend flach. Am "
+             "Start steht eine Bank.",
+    "kurz":  "Schattige Waldrunde — angenehm, wenn die Sonne drückt. Der Weg "
+             "ist fest, aber es geht mehrfach spürbar bergauf: zusammen gut "
+             "450 m zum Schieben. Unterwegs steht keine Bank, also besser "
+             "eine Pausendecke einpacken.",
+    "see":   "Die schönste Strecke am Wasser, aber mit Wagen nur mit Hilfe: "
+             "auf halber Strecke liegen zwei kurze Treppenstücke, da muss der "
+             "Wagen getragen werden. Dafür stehen sieben Bänke an der Runde, "
+             "sechs davon dicht beieinander als Rastplatz.",
+    "gross": "Lange Runde mit vielen Wechseln. Auch hier Treppen auf der "
+             "Strecke und mehrere längere Anstiege — mit Wagen anstrengend, "
+             "aber es gibt reichlich Bänke zum Verschnaufen.",
+    "pano":  "Die anspruchsvollste Runde: über zwei Stunden, mehrere hundert "
+             "Meter steile Abschnitte und Treppen. Mit Kinderwagen nicht zu "
+             "empfehlen — mit Kraxe dagegen eine schöne Tour.",
+}
+
 
 def main():
     if "--fetch" in sys.argv:
@@ -43,6 +66,7 @@ def main():
         raise SystemExit("[build] FEHLER: keine Runden gefunden")
     for r in routes:
         r["desc"] = DESCRIPTIONS.get(r["id"], "")
+        r["desc_kw"] = DESCRIPTIONS_KW.get(r["id"], "")
 
     osm = route_engine.load_osm()
     lake_ring = osm["lake_ring"]
