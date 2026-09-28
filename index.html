@@ -634,6 +634,7 @@ function selectRoute(base, opt){
   if (cards.length) cards.forEach(c => c.classList.toggle("selected", c.dataset.route === r.id));
   else renderRoutes();
   renderDetail(r);
+  renderEdit(r);
   if (opt && opt.fly){
     const b = new maplibregl.LngLatBounds();
     r.coords.forEach(c => b.extend(c));
@@ -2097,6 +2098,21 @@ function scoreRoutes(){
     (a.blockers.length - b.blockers.length) || (b.score - a.score));
   return results;
 }
+
+/* Pruefzugang fuer automatisierte Sichtpruefung: mit const/let deklarierte
+   Werte liegen nicht auf window und sind aus eingespeisten Skripten sonst
+   unerreichbar. Nur Lesezugriff auf bereits vorhandenen Zustand. */
+window.__app = {
+  get map(){ return map; },
+  get routes(){ return ROUTES; },
+  get activeRoute(){ return activeRoute; },
+  get activeBase(){ return activeBase; },
+  get custom(){ return custom; },
+  get filters(){ return filters; },
+  get kwMode(){ return kwMode; },
+  get variants(){ return VARIANTS; },
+  deriveRoute, scoreRoutes, shadeMask, routeGPX,
+};
 
 function applyWizard(){
   const res = scoreRoutes();
