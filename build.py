@@ -11,6 +11,7 @@ import sys
 import subprocess
 
 import route_engine
+import shade
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,6 +70,8 @@ def main():
         r["desc_kw"] = DESCRIPTIONS_KW.get(r["id"], "")
 
     osm = route_engine.load_osm()
+    shade.compute(routes, osm, verbose=True)
+
     lake_ring = osm["lake_ring"]
     lake = {
         "name": osm["lake_name"],

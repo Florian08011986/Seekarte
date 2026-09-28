@@ -217,6 +217,30 @@ body.kw .sheet-title{font-size:16.5px}
   padding:12px 12px calc(var(--safe-b) + 14px);background:linear-gradient(0deg,rgba(5,8,11,.95),transparent);
   font-size:11px;color:var(--muted)}
 .photo-bar span{flex:1;line-height:1.4}
+.t-bar{display:flex;align-items:center;gap:10px;background:rgba(22,27,34,.9);
+  border:1px solid var(--line);border-radius:13px;padding:8px 12px;backdrop-filter:blur(10px)}
+.t-play{width:34px;height:34px;border-radius:99px;background:var(--accent);color:#06121f;
+  font-size:13px;font-weight:700;flex:none;display:grid;place-items:center}
+.t-slider{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:99px;
+  background:var(--line);outline:none}
+.t-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:99px;
+  background:var(--accent);border:3px solid #0d1117;cursor:pointer}
+.t-slider::-moz-range-thumb{width:20px;height:20px;border-radius:99px;background:var(--accent);
+  border:3px solid #0d1117;cursor:pointer}
+
+.sh-strip{display:flex;gap:3px;align-items:flex-end;height:64px;margin:8px 0 4px}
+.sh-cell{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;
+  height:100%;border-radius:6px 6px 4px 4px;background:#0f151c;border:1px solid transparent;
+  padding-bottom:2px;gap:2px}
+.sh-cell.on{border-color:var(--accent);background:var(--accent-soft)}
+.sh-bar{width:100%;border-radius:4px 4px 0 0;background:linear-gradient(180deg,#4aa8ff,#2d6da8);
+  display:block;min-height:3px}
+.sh-h{font-size:8.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.sh-legend{font-size:13px;margin-top:4px}
+.sh-legend b{color:var(--accent);font-size:15px}
+body.kw .sh-strip{height:76px}
+body.kw .sh-h{font-size:10px}
+
 .loading{position:absolute;inset:0;display:grid;place-items:center;z-index:50;
   background:rgba(9,12,16,.7);backdrop-filter:blur(6px);font-size:13px;color:var(--muted)}
 .loading[hidden]{display:none}
@@ -290,9 +314,13 @@ body.kw .sheet-title{font-size:16.5px}
     <button class="icon-btn" id="g-exit" title="Zurück zur Karte">✕</button>
   </div>
   <div class="g-bottom">
-    <div style="flex:1;display:flex;flex-direction:column;gap:8px;align-items:flex-start">
-      <button class="cta" id="g-photo-btn" hidden>Foto vor Ort</button>
-      <div class="g-hint" id="g-hint">Ziehen zum Umsehen · hoch/runter zum Neigen</div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px;align-items:stretch">
+      <button class="cta" id="g-photo-btn" hidden style="align-self:flex-start">Foto vor Ort</button>
+      <div class="t-bar">
+        <button class="t-play" id="t-play" title="Abfahren">▶</button>
+        <input type="range" id="t-slider" class="t-slider" min="0" max="1000" value="0"
+               aria-label="Position auf der Runde">
+      </div>
     </div>
     <button class="compass" id="g-compass" title="Nach Norden"><span class="compass-n" id="g-needle">N</span></button>
   </div>
@@ -368,6 +396,12 @@ map.on("load", () => {
   map.addLayer({id:"route-dash", type:"line", source:"route",
     layout:{"line-cap":"round","line-join":"round"},
     paint:{"line-color":"#eaf4ff","line-width":1.6,"line-dasharray":[1.5,2.5],"line-opacity":.75}});
+
+  map.addSource("shade", {type:"geojson", data:emptyFC()});
+  map.addLayer({id:"shade-line", type:"line", source:"shade",
+    layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-width":9, "line-opacity":.55, "line-blur":1,
+           "line-color":["match", ["get","sh"], 1, "#2f6b8f", "#f2c14e"]}});
 
   map.addSource("rest", {type:"geojson", data:emptyFC()});
   map.addLayer({id:"rest-halo", type:"circle", source:"rest",
@@ -461,10 +495,15 @@ function selectRoute(r, opt){
   if (src) src.setData({type:"Feature", geometry:{type:"LineString", coordinates:r.coords}, properties:{}});
   highlightSpots(r.hotspots);
   renderRest(r);
+  paintShade(r);
   document.getElementById("sheet-title").textContent = r.name;
   document.getElementById("sheet-sub").textContent =
     `${r.km.toFixed(2).replace(".", ",")} km Runde · ${r.ascent_m} Hm · ${r.duration}`;
-  renderRoutes(); renderDetail(r);
+  // nur die Markierung umsetzen statt die ganze Liste neu zu erzeugen
+  const cards = document.querySelectorAll("#panel-routes [data-route]");
+  if (cards.length) cards.forEach(c => c.classList.toggle("selected", c.dataset.route === r.id));
+  else renderRoutes();
+  renderDetail(r);
   if (opt && opt.fly){
     const b = new maplibregl.LngLatBounds();
     r.coords.forEach(c => b.extend(c));
@@ -491,6 +530,10 @@ function renderDetail(r){
       <span>${r.lowpoint_m} m</span><span>${r.highpoint_m} m</span>
     </div>
     ${kwMode ? kwSection(r) : ""}
+    <div class="section-h">Schatten im Tagesverlauf</div>
+    ${shadeStrip(r)}
+    <button class="btn btn-ghost" id="btn-tour" style="width:100%;margin-top:12px">
+      ▶ Runde abfahren (3D)</button>
     <div class="section-h">Beschaffenheit</div>
     <div class="card-meta">${routePills(r)}</div>
     <div class="card-desc">${r.desc}</div>
@@ -504,6 +547,9 @@ function renderDetail(r){
       </div>`).join("")
       : `<div class="empty">Auf dieser Runde liegen keine der markierten Orte.</div>`}`;
   drawProfile(r);
+  bindShadeStrip(r);
+  const tourBtn = document.getElementById("btn-tour");
+  if (tourBtn) tourBtn.addEventListener("click", () => enterTour(r, 0));
   el.querySelectorAll("[data-spot]").forEach(row =>
     row.addEventListener("click", () => openSpot(SPOT_BY_ID[row.dataset.spot])));
 }
@@ -589,7 +635,7 @@ function openSpot(s){
       <div class="card-desc">${s.desc}</div>
     </div>
     <button class="btn btn-main" id="enter-ground" style="width:100%;margin:4px 0 12px">
-      Vor Ort umsehen (3D)</button>
+      Auf der Runde hierher fahren</button>
     <div class="section-h">Vor Ort</div>
     ${[["Infrastruktur", s.infrastructure], ["Öffnungszeiten", s.opening_hours],
        ["Kosten", s.fees], ["Regeln", s.rules]].filter(x => x[1]).map(x => `
@@ -601,7 +647,23 @@ function openSpot(s){
       ← Zurück zur Runde</button>`;
   document.getElementById("sheet-title").textContent = s.name;
   document.getElementById("sheet-sub").textContent = "Ort am Blindsee";
-  document.getElementById("enter-ground").addEventListener("click", () => enterGround(s));
+  document.getElementById("enter-ground").addEventListener("click", () => {
+    // Startpunkt auf der aktiven Runde suchen, die dem Ort am naechsten liegt
+    const r = (activeRoute && activeRoute.hotspots.includes(s.id))
+      ? activeRoute
+      : (ROUTES.find(x => x.hotspots.includes(s.id)) || activeRoute || ROUTES[0]);
+    buildTourIndex(r);
+    let bd = Infinity, bdist = 0, acc = 0;
+    for (let i = 1; i < r.coords.length; i++){
+      const a = r.coords[i];
+      const dx = (a[0] - s.lon) * 111320 * Math.cos(s.lat * Math.PI / 180);
+      const dy = (a[1] - s.lat) * 110540;
+      const d = Math.hypot(dx, dy);
+      acc = tourCum[i];
+      if (d < bd){ bd = d; bdist = acc; }
+    }
+    enterTour(r, Math.max(0, bdist - 80));
+  });
   document.getElementById("back-route").addEventListener("click", () => {
     activeSpot = null; showTab("routes"); selectRoute(activeRoute, {fly:true});
   });
@@ -610,86 +672,325 @@ function openSpot(s){
     duration:reduceMotion ? 0 : 1400});
 }
 
-/* =================== Bodenansicht (Vor-Ort-Perspektive) =================== */
-/* MapLibre kann die Kamera nicht frei setzen - sie haengt immer am Kartenmittel-
-   punkt. Um trotzdem AM Ort zu stehen statt schraeg darueber zu schweben, wird
-   der Mittelpunkt genau so weit in Blickrichtung vorverlegt, wie die Kamera bei
-   gegebener Neigung dahinter liegt. Die Distanz wird aus Blickfeld, Canvas-Hoehe
-   und Zoom gerechnet, nicht geraten. */
-const G_PITCH_MAX = 87, G_PITCH_MIN = 55;
-let groundOn = false, gSpot = null, gLon = 0, gLat = 0,
-    gBear = 0, gPitch = 87, gZoom = 19.2, gGround = 1100;
+/* =================== Sonnenstand & Schatten =================== */
+/* Das Horizontprofil je Stuetzpunkt kommt vorberechnet aus shade.py; die
+   Sonnenposition wird hier gerechnet, damit Datum und Uhrzeit frei bleiben. */
+function sunPosition(date, lat, lon){
+  const rad = Math.PI / 180;
+  const days = date.getTime() / 86400000 - 0.5 + 2440588 - 2451545;
+  const M = rad * (357.5291 + 0.98560028 * days);
+  const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + rad * 102.9372 + Math.PI;
+  const e = rad * 23.4397;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+  const H = rad * (280.16 + 360.9856235 * days) + rad * lon - ra;
+  const phi = rad * lat;
+  const alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+  let az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi));
+  az = (az / rad + 180 + 360) % 360;
+  return {alt: alt / rad, az: az};
+}
 
-function terrainAt(lon, lat, fallback){
+/* Oesterreichische Zeit fest verdrahtet statt der Geraetezeitzone - sonst
+   stimmen die Schattenzeiten nur, wenn man zufaellig in derselben Zone sitzt. */
+function lastSundayUTC(year, month){
+  const d = new Date(Date.UTC(year, month + 1, 0));
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d;
+}
+function localToDate(y, m, d, hour, minute){
+  const naive = Date.UTC(y, m, d, hour, minute || 0);
+  const dstStart = lastSundayUTC(y, 2); dstStart.setUTCHours(1);
+  const dstEnd = lastSundayUTC(y, 9); dstEnd.setUTCHours(1);
+  const t = new Date(naive);
+  const off = (t >= dstStart && t < dstEnd) ? 2 : 1;
+  return new Date(naive - off * 3600000);
+}
+
+function shadeMask(route, when){
+  const sh = route.shade;
+  if (!sh || !sh.hz || !sh.hz.length) return null;
+  const sun = sunPosition(when, LAKE.center[1], LAKE.center[0]);
+  const n = sh.hz.length, mask = new Array(n);
+  const per = 360 / sh.bins;
+  for (let i = 0; i < n; i++){
+    if (sun.alt <= 0 || sh.fr[i] === "1"){ mask[i] = 1; continue; }
+    const b = sun.az / per;
+    const b0 = Math.floor(b) % sh.bins, b1 = (b0 + 1) % sh.bins, t = b - Math.floor(b);
+    const horizon = sh.hz[i][b0] * (1 - t) + sh.hz[i][b1] * t;
+    mask[i] = sun.alt <= horizon ? 1 : 0;
+  }
+  let sum = 0; for (const m of mask) sum += m;
+  return {mask, sun, frac: sum / n};
+}
+
+/* Linie nach Schatten einfaerben: jeder Streckenpunkt bekommt den Zustand
+   des naechstgelegenen Stuetzpunkts. */
+function shadeGeoJSON(route, mask){
+  const step = route.shade.step_m;
+  const feats = [];
+  let dist = 0, run = [route.coords[0]], cur = null;
+  for (let i = 1; i < route.coords.length; i++){
+    const a = route.coords[i - 1], b = route.coords[i];
+    const dx = (b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180);
+    const dy = (b[1] - a[1]) * 110540;
+    const idx = Math.min(mask.length - 1, Math.round(dist / step));
+    const state = mask[idx];
+    if (cur === null) cur = state;
+    if (state !== cur){
+      feats.push({type:"Feature", geometry:{type:"LineString", coordinates:run.slice()},
+                  properties:{sh:cur}});
+      run = [a]; cur = state;
+    }
+    run.push(b);
+    dist += Math.hypot(dx, dy);
+  }
+  if (run.length > 1)
+    feats.push({type:"Feature", geometry:{type:"LineString", coordinates:run},
+                properties:{sh:cur === null ? 0 : cur}});
+  return {type:"FeatureCollection", features:feats};
+}
+
+let shadeHour = new Date().getHours();
+let shadeDate = new Date();
+
+function shadeStrip(r){
+  if (!r.shade || !r.shade.hz || !r.shade.hz.length)
+    return `<div class="kw-note">Für diese Runde liegen keine Schattendaten vor.</div>`;
+  const y = shadeDate.getFullYear(), m = shadeDate.getMonth(), d = shadeDate.getDate();
+  const cells = [];
+  let best = null;
+  for (let h = 6; h <= 20; h++){
+    const res = shadeMask(r, localToDate(y, m, d, h, 30));
+    const pct = Math.round(res.frac * 100);
+    const night = res.sun.alt <= 0;
+    cells.push({h, pct, night});
+    if (!night && (best === null || pct > best.pct)) best = {h, pct};
+  }
+  const cur = cells.find(c => c.h === shadeHour) || cells[0];
+  const bars = cells.map(c => `
+    <button class="sh-cell ${c.h === shadeHour ? "on" : ""}" data-hour="${c.h}"
+            title="${c.h}:00 Uhr — ${c.pct} % Schatten">
+      <span class="sh-bar" style="height:${Math.max(4, c.pct)}%"></span>
+      <span class="sh-h">${c.h}</span>
+    </button>`).join("");
+  const morning = cells.filter(c => c.h <= 11 && !c.night);
+  const noon = cells.filter(c => c.h > 11 && c.h <= 15 && !c.night);
+  const avg = a => a.length ? Math.round(a.reduce((s, c) => s + c.pct, 0) / a.length) : 0;
+  return `
+    <div class="sh-legend">
+      <b>${cur.pct} % im Schatten</b> um ${cur.h}:00 Uhr
+      ${cur.night ? " · Sonne steht unter dem Horizont" : ""}
+    </div>
+    <div class="sh-strip">${bars}</div>
+    <div class="kw-note">
+      Vormittag (6–11 Uhr) im Mittel ${avg(morning)} % Schatten, Mittag
+      (12–15 Uhr) ${avg(noon)} %.
+      ${best ? `Am schattigsten ist es gegen ${best.h}:00 Uhr (${best.pct} %).` : ""}
+      Gerechnet für ${String(d).padStart(2, "0")}.${String(m + 1).padStart(2, "0")}.${y}
+      aus Geländehorizont und Waldflächen.
+    </div>`;
+}
+
+function bindShadeStrip(r){
+  document.querySelectorAll(".sh-cell").forEach(c =>
+    c.addEventListener("click", () => {
+      shadeHour = +c.dataset.hour;
+      renderDetail(r);
+      paintShade(r);
+    }));
+}
+
+function paintShade(r){
+  const src = map.getSource("shade");
+  if (!src) return;
+  if (!r || !r.shade || !r.shade.hz || !r.shade.hz.length){ src.setData(emptyFC()); return; }
+  const res = shadeMask(r, localToDate(shadeDate.getFullYear(), shadeDate.getMonth(),
+                                       shadeDate.getDate(), shadeHour, 30));
+  src.setData(shadeGeoJSON(r, res.mask));
+}
+
+/* =================== Tour-Kamera auf festem Pfad =================== */
+/* Freies Umsehen liess die Kamera in den Hang geraten - man sah durch Fels
+   und Baeume hindurch. Stattdessen faehrt die Kamera jetzt auf der Runde
+   selbst: Position und Blickrichtung kommen aus der Linie, die Neigung wird
+   so weit zurueckgenommen, dass das Gelaende davor den Blick nicht schneidet. */
+let tourOn = false, tourRoute = null, tourDist = 0, tourPlaying = false,
+    tourLen = 0, tourCum = [], tourRaf = 0, tourLast = 0;
+
+function buildTourIndex(r){
+  tourCum = [0];
+  for (let i = 1; i < r.coords.length; i++){
+    const a = r.coords[i - 1], b = r.coords[i];
+    const dx = (b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180);
+    const dy = (b[1] - a[1]) * 110540;
+    tourCum.push(tourCum[i - 1] + Math.hypot(dx, dy));
+  }
+  tourLen = tourCum[tourCum.length - 1];
+}
+
+function pointAt(r, dist){
+  const d = Math.max(0, Math.min(tourLen, dist));
+  let lo = 0, hi = tourCum.length - 1;
+  while (lo < hi - 1){
+    const mid = (lo + hi) >> 1;
+    if (tourCum[mid] <= d) lo = mid; else hi = mid;
+  }
+  const span = tourCum[hi] - tourCum[lo] || 1;
+  const t = (d - tourCum[lo]) / span;
+  const a = r.coords[lo], b = r.coords[hi];
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+
+function bearingAt(r, dist){
+  // ueber 60 m mitteln, sonst zappelt die Blickrichtung an jedem Knick
+  const p0 = pointAt(r, dist), p1 = pointAt(r, Math.min(tourLen, dist + 60));
+  const dx = (p1[0] - p0[0]) * Math.cos(p0[1] * Math.PI / 180);
+  const dy = (p1[1] - p0[1]);
+  return (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+}
+
+function metersPerPixel(lat, zoom){
+  return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+}
+
+/* Neigung so waehlen, dass die Kamera ueber allem bleibt was zwischen ihr
+   und dem Blickziel liegt. */
+function clearPitch(lon, lat, bearing, zoom){
+  const fovDeg = map.getVerticalFieldOfView ? map.getVerticalFieldOfView() : 36.87;
+  const camPx = 0.5 * (map.getCanvas().clientHeight || 700) / Math.tan(fovDeg * Math.PI / 360);
+  const groundZ = safeElev(lon, lat, 1100);
+  for (let pitch = 80; pitch >= 55; pitch -= 5){
+    const dist = camPx * metersPerPixel(lat, zoom);
+    const camH = dist * Math.cos(pitch * Math.PI / 180);
+    const back = dist * Math.sin(pitch * Math.PI / 180);
+    const rad = (bearing + 180) * Math.PI / 180;
+    let ok = true;
+    for (let f = 0.25; f <= 1.0; f += 0.25){
+      const rr = back * f;
+      const plat = lat + (rr * Math.cos(rad)) / 110540;
+      const plon = lon + (rr * Math.sin(rad)) / (111320 * Math.cos(lat * Math.PI / 180));
+      const z = safeElev(plon, plat, groundZ);
+      // Sichtlinie von der Kamera zum Standpunkt, 4 m Luft als Puffer
+      if (z > groundZ + camH * f + 4){ ok = false; break; }
+    }
+    if (ok) return pitch;
+  }
+  return 55;
+}
+
+function safeElev(lon, lat, fallback){
   try {
     const z = map.queryTerrainElevation({lng:lon, lat:lat});
     return (z === null || z === undefined || !isFinite(z)) ? fallback : z;
   } catch(e){ return fallback; }
 }
 
-/* Abstand Kamera <-> Kartenmittelpunkt in Metern */
-function cameraDistanceM(){
+let pitchCache = 72, pitchCheckedAt = -1e9, pitchCheckedDist = -1e9;
+
+function applyTourCamera(){
+  if (!tourOn || !tourRoute) return;
+  const zoom = 18.4;
+  const p = pointAt(tourRoute, tourDist);
+  const bear = bearingAt(tourRoute, tourDist);
+  // Die Gelaendeabfrage kostet spuerbar, das Gelaende aendert sich aber nicht
+  // von Bild zu Bild - hoechstens alle 15 m oder 250 ms neu bestimmen.
+  const now = performance.now();
+  if (Math.abs(tourDist - pitchCheckedDist) > 15 || now - pitchCheckedAt > 250){
+    const target = clearPitch(p[0], p[1], bear, zoom);
+    pitchCache += (target - pitchCache) * 0.5;   // weich nachziehen statt springen
+    pitchCheckedAt = now;
+    pitchCheckedDist = tourDist;
+  }
+  const pitch = pitchCache;
   const fovDeg = map.getVerticalFieldOfView ? map.getVerticalFieldOfView() : 36.87;
-  const fov = fovDeg * Math.PI / 180;
-  const h = map.getCanvas().clientHeight || 700;
-  const px = 0.5 * h / Math.tan(fov / 2);
-  const mpp = 156543.03392 * Math.cos(gLat * Math.PI / 180) / Math.pow(2, gZoom);
-  return px * mpp;
-}
-
-function applyGroundCamera(){
-  const dist = cameraDistanceM();
-  const ahead = dist * Math.sin(gPitch * Math.PI / 180);   // Versatz am Boden
-  const rad = gBear * Math.PI / 180;
-  const cLat = gLat + (ahead * Math.cos(rad)) / 110540;
-  const cLon = gLon + (ahead * Math.sin(rad)) / (111320 * Math.cos(gLat * Math.PI / 180));
-  map.jumpTo({center:[cLon, cLat], zoom:gZoom, pitch:gPitch, bearing:gBear});
-  document.getElementById("g-needle").style.transform = `rotate(${-gBear}deg)`;
-  const above = dist * Math.cos(gPitch * Math.PI / 180);
+  const camPx = 0.5 * (map.getCanvas().clientHeight || 700) / Math.tan(fovDeg * Math.PI / 360);
+  const ahead = camPx * metersPerPixel(p[1], zoom) * Math.sin(pitch * Math.PI / 180);
+  const rad = bear * Math.PI / 180;
+  const cLat = p[1] + (ahead * Math.cos(rad)) / 110540;
+  const cLon = p[0] + (ahead * Math.sin(rad)) / (111320 * Math.cos(p[1] * Math.PI / 180));
+  map.jumpTo({center:[cLon, cLat], zoom:zoom, pitch:pitch, bearing:bear});
+  document.getElementById("g-needle").style.transform = `rotate(${-bear}deg)`;
+  document.getElementById("t-slider").value = String(Math.round(tourDist));
   document.getElementById("g-dir").textContent =
-    `Blick nach ${compassName(gBear)} · ${Math.round(gGround)} m ü. NN · ca. ${Math.round(above)} m über Grund`;
+    `km ${(tourDist / 1000).toFixed(2).replace(".", ",")} von ` +
+    `${(tourLen / 1000).toFixed(2).replace(".", ",")} · Blick nach ${compassName(bear)}`;
+  const near = nearestSpot(p);
+  document.getElementById("g-name").textContent =
+    near ? `${tourRoute.name} — ${near.name}` : tourRoute.name;
 }
 
-async function enterGround(s){
-  gSpot = s; gLon = s.lon; gLat = s.lat; gBear = s.bearing || 0;
-  gPitch = G_PITCH_MAX; gZoom = 19.2;
+function nearestSpot(p){
+  let best = null, bd = 120;
+  for (const s of SPOTS){
+    const dx = (s.lon - p[0]) * 111320 * Math.cos(p[1] * Math.PI / 180);
+    const dy = (s.lat - p[1]) * 110540;
+    const d = Math.hypot(dx, dy);
+    if (d < bd){ bd = d; best = s; }
+  }
+  return best;
+}
+
+async function enterTour(route, startDist){
+  tourRoute = route;
+  buildTourIndex(route);
+  tourDist = startDist || 0;
   const load = document.getElementById("loading");
   document.getElementById("loading-txt").textContent = "Gelände wird geladen…";
   load.hidden = false;
 
-  map.easeTo({center:[gLon, gLat], zoom:17.4, pitch:66, bearing:gBear,
-    duration:reduceMotion ? 0 : 1400, essential:true});
+  const p = pointAt(route, tourDist);
+  map.easeTo({center:[p[0], p[1]], zoom:17.2, pitch:62, bearing:bearingAt(route, tourDist),
+    duration:reduceMotion ? 0 : 1200, essential:true});
   await once(map, "moveend");
   await tilesReady(3000);
 
-  gGround = terrainAt(gLon, gLat, 1100);
-  groundOn = true;
+  tourOn = true;
   map.dragPan.disable(); map.dragRotate.disable(); map.scrollZoom.disable();
   map.touchZoomRotate.disable(); map.keyboard.disable(); map.doubleClickZoom.disable();
-  applyGroundCamera();
-  await tilesReady(2500);
+  const sl = document.getElementById("t-slider");
+  sl.max = String(Math.round(tourLen));
+  sl.value = String(Math.round(tourDist));
+  applyTourCamera();
+  await tilesReady(2000);
 
   load.hidden = true;
   document.getElementById("ground").hidden = false;
-  document.getElementById("g-name").textContent = s.name;
   setSheet("hidden");
-  const hint = document.getElementById("g-hint");
-  hint.classList.remove("fade");
-  setTimeout(() => hint.classList.add("fade"), 4500);
-
-  lookForPhoto(s);
+  lookForPhoto(nearestSpot(p) || {lat:p[1], lon:p[0]});
 }
 
-function exitGround(){
-  groundOn = false;
+function exitTour(){
+  tourOn = false; tourPlaying = false;
+  if (tourRaf) cancelAnimationFrame(tourRaf), tourRaf = 0;
   closePhoto();
   document.getElementById("ground").hidden = true;
   document.getElementById("g-photo-btn").hidden = true;
+  document.getElementById("t-play").textContent = "▶";
   map.dragPan.enable(); map.dragRotate.enable(); map.scrollZoom.enable();
   map.touchZoomRotate.enable(); map.keyboard.enable(); map.doubleClickZoom.enable();
-  map.easeTo({center:[gLon, gLat], zoom:15.6, pitch:50,
-    duration:reduceMotion ? 0 : 1200});
+  if (tourRoute) selectRoute(tourRoute, {fly:true});
   setSheet("half");
+}
+
+/* Kamera nur einmal pro Bild aktualisieren statt bei jedem Eingabe-Event -
+   der Schieberegler feuert sonst weit oefter als das Display zeichnet. */
+let camDirty = false;
+function requestCamera(){
+  if (camDirty) return;
+  camDirty = true;
+  requestAnimationFrame(() => { camDirty = false; applyTourCamera(); });
+}
+
+function tourStep(ts){
+  if (!tourPlaying){ tourRaf = 0; return; }
+  const dt = tourLast ? (ts - tourLast) / 1000 : 0;
+  tourLast = ts;
+  tourDist += dt * 28;                  // etwa Schritttempo im Zeitraffer
+  if (tourDist >= tourLen) tourDist = 0;
+  applyTourCamera();
+  tourRaf = requestAnimationFrame(tourStep);
 }
 
 function compassName(b){
@@ -707,37 +1008,12 @@ function tilesReady(maxMs){
   });
 }
 
-/* Umsehen per Drag - eigene Steuerung, da die Standardhandler abgeschaltet sind */
-(function lookAround(){
-  const el = map.getCanvas();
-  let drag = false, lx = 0, ly = 0;
-  const pos = e => e.touches && e.touches[0]
-    ? {x:e.touches[0].clientX, y:e.touches[0].clientY}
-    : {x:e.clientX, y:e.clientY};
-  const start = e => { if (!groundOn) return; const p = pos(e); drag = true; lx = p.x; ly = p.y; };
-  const move = e => {
-    if (!groundOn || !drag) return;
-    const p = pos(e);
-    gBear = ((gBear + (lx - p.x) * 0.24) % 360 + 360) % 360;
-    gPitch = Math.max(G_PITCH_MIN, Math.min(G_PITCH_MAX, gPitch + (p.y - ly) * 0.10));
-    lx = p.x; ly = p.y;
-    applyGroundCamera();
-    if (e.cancelable) e.preventDefault();
-  };
-  const end = () => { drag = false; };
-  el.addEventListener("mousedown", start);
-  el.addEventListener("touchstart", start, {passive:true});
-  window.addEventListener("mousemove", move);
-  el.addEventListener("touchmove", move, {passive:false});
-  window.addEventListener("mouseup", end);
-  el.addEventListener("touchend", end);
-})();
-
 /* ---- Echtes Vor-Ort-Foto (Panoramax, offen und ohne Schluessel) ---- */
 let photoUrl = null;
 async function lookForPhoto(s){
   const btn = document.getElementById("g-photo-btn");
   btn.hidden = true; photoUrl = null;
+  if (!s) return;
   const d = 0.004;
   const bbox = [s.lon - d, s.lat - d, s.lon + d, s.lat + d].join(",");
   try {
@@ -753,32 +1029,43 @@ async function lookForPhoto(s){
       const dist = Math.hypot(dx, dy);
       if (dist < bestD){ bestD = dist; best = f; }
     }
-    if (!best || bestD > 150) return;   // weiter weg zeigt einen anderen Ort
+    if (!best || bestD > 150) return;
     const asset = best.assets && (best.assets.hd || best.assets.sd || best.assets.thumb);
     if (!asset || !asset.href) return;
     photoUrl = asset.href;
     btn.hidden = false;
     btn.textContent = `Foto vor Ort (${Math.round(bestD)} m)`;
-  } catch(e){ /* offline oder Dienst weg: 3D-Ansicht bleibt nutzbar */ }
+  } catch(e){ /* offline: die 3D-Ansicht bleibt nutzbar */ }
 }
 
 function openPhoto(){
   if (!photoUrl) return;
-  const v = document.getElementById("photo-view");
   document.getElementById("photo-img").src = photoUrl;
-  v.hidden = false;
+  document.getElementById("photo-view").hidden = false;
 }
 function closePhoto(){ document.getElementById("photo-view").hidden = true; }
 
-document.getElementById("g-exit").addEventListener("click", exitGround);
+document.getElementById("g-exit").addEventListener("click", exitTour);
 document.getElementById("g-info").addEventListener("click", () => {
   setSheet(document.getElementById("sheet").dataset.state === "hidden" ? "half" : "hidden");
 });
 document.getElementById("g-compass").addEventListener("click", () => {
-  gBear = 0; applyGroundCamera();
+  tourDist = 0; requestCamera();
 });
 document.getElementById("g-photo-btn").addEventListener("click", openPhoto);
 document.getElementById("photo-close").addEventListener("click", closePhoto);
+document.getElementById("t-slider").addEventListener("input", e => {
+  tourPlaying = false;
+  document.getElementById("t-play").textContent = "▶";
+  tourDist = +e.target.value;
+  requestCamera();
+});
+document.getElementById("t-play").addEventListener("click", () => {
+  tourPlaying = !tourPlaying;
+  document.getElementById("t-play").textContent = tourPlaying ? "❚❚" : "▶";
+  tourLast = 0;
+  if (tourPlaying && !tourRaf) tourRaf = requestAnimationFrame(tourStep);
+});
 
 /* ============================ Sheet & Tabs ============================ */
 const sheet = document.getElementById("sheet");
@@ -839,7 +1126,7 @@ document.getElementById("btn-kw").addEventListener("click", () => {
 });
 
 document.getElementById("btn-reset").addEventListener("click", () => {
-  if (groundOn) exitGround();
+  if (tourOn) exitTour();
   activeSpot = null; showTab("routes"); setSheet("half");
   selectRoute(activeRoute || ROUTES[0], {fly:true});
 });

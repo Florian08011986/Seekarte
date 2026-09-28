@@ -14,8 +14,14 @@ Interaktive 3D-Karte mit **echten, berechneten Rundwegen** rund um den Blindsee 
   Kinder, Hund, sportlich), akzeptierte Steigung und Schwerpunkte (Wasser,
   Aussicht, Schatten, Sehenswürdigkeiten, Ruhe). Harte Anforderungen filtern,
   weiche Wünsche gewichten — und der Vorschlag wird begründet.
-- **Vor-Ort-Ansicht in 3D.** Die Kamera wird auf Geländehöhe an den Ort gesetzt;
-  per Ziehen schaut man sich um. Wo offene Bodenfotos existieren
+- **Schattenzeiten.** Für Stützpunkte entlang jeder Runde ist aus dem
+  Höhenmodell ein Horizontprofil vorberechnet (12 Himmelsrichtungen, Berge bis
+  10 km Entfernung). Die Karte rechnet dazu den Sonnenstand und zeigt den
+  Schattenanteil über den Tag — die Linie färbt sich sonnig/schattig.
+- **Tour-Kamera auf festem Pfad.** Die Kamera fährt die Runde ab: Position und
+  Blickrichtung kommen aus der Linie, die Neigung wird automatisch so weit
+  zurückgenommen, dass das Gelände davor die Sicht nicht schneidet. Bedient
+  über Schieberegler und Abspielknopf. Wo offene Bodenfotos existieren
   ([Panoramax](https://panoramax.xyz)), gibt es zusätzlich das echte Foto.
 - **Kinderwagen-Modus** (👶 in der Kopfzeile): Kinderwagen-Ampel je Runde mit
   Begründung, Rastpunkte aus OSM auf der Karte, eine Zeitleiste mit allen
@@ -48,6 +54,8 @@ Strecke, an denen der Wagen getragen werden muss.
 | `index.html` | fertige Anwendung (wird generiert — nicht direkt bearbeiten) |
 | `template.html` | Quelle für Oberfläche, Stile und Logik; `__DATA__` wird beim Build ersetzt |
 | `route_engine.py` | findet und bewertet die Rundwege im Wegenetz |
+| `shade.py` | Horizontprofile und Waldanteil je Stützpunkt |
+| `shade_cache.json` | vorberechnete Horizontprofile, damit der Build ohne die DEM-Kachel läuft |
 | `build.py` | setzt Template und berechnete Daten zu `index.html` zusammen |
 | `fetch_osm.py` | holt die OSM-Rohdaten von Overpass nach `osm_cache.json` |
 | `hotspots.json` | die redaktionellen Ortsinhalte (Kosten, Zeiten, Regeln) |
@@ -90,10 +98,15 @@ python3 -m http.server 8088   # dann http://127.0.0.1:8088/
 
 - **Kein Street View.** Echte Bodenfotos gibt es über Panoramax nur dort, wo
   jemand welche aufgenommen hat — am Blindsee im Wesentlichen entlang der
-  B179, nicht auf den Uferpfaden. Für alle anderen Orte zeigt die
-  Vor-Ort-Ansicht das 3D-Gelände. MapLibre kann die Kamera nicht frei
-  platzieren, deshalb steht sie je nach Zoom einige Meter über dem Boden statt
-  exakt auf Augenhöhe.
+  B179, nicht auf den Uferpfaden. Für alle anderen Stellen zeigt die
+  Tour-Kamera das 3D-Gelände. MapLibre kann die Kamera nicht frei platzieren,
+  deshalb bleibt sie einige Meter über dem Boden; freies Umsehen gibt es
+  bewusst nicht, weil die Kamera dabei in den Hang gerät und man durch das
+  Gelände hindurchsieht.
+- **Schattenzeiten sind Geländeschatten**, kein Wetter: bei Bewölkung ist
+  ohnehin alles im Schatten. Einzelbäume fehlen, nur zusammenhängende
+  Waldflächen aus OSM zählen. Das Horizontprofil hat 30°-Auflösung und wird
+  zwischen den Richtungen interpoliert.
 - Steigungswerte stammen aus einem ~30-m-Höhenmodell. Kurze Rampen können
   dadurch geglättet sein.
 - Rastpunkte und WCs stammen aus OpenStreetMap und sind dort unvollständig:

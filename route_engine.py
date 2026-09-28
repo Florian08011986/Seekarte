@@ -736,8 +736,43 @@ def enrich(osm, get_z, ring, hotspots):
         "benches": sum(1 for r in rest if r["kind"] == "bench"),
         "hotspots": [h["id"] for h in on_route],
         "hotspot_detours": {h["id"]: h["detour_m"] for h in on_route},
-        "coords": [[round(p[1], 6), round(p[0], 6)] for p in pts],
+        "coords": [[round(p[1], 5), round(p[0], 5)] for p in simplify(pts)],
     }
+
+
+def simplify(points, tol_m=3.0):
+    """Douglas-Peucker: entfernt Punkte, die auf der Linie ohnehin liegen."""
+    if len(points) < 3:
+        return points
+    lat0 = points[0][0]
+    kx = 111320.0 * math.cos(math.radians(lat0))
+    ky = 110540.0
+    xy = [((p[1] * kx), (p[0] * ky)) for p in points]
+
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        i, j = stack.pop()
+        ax, ay = xy[i]
+        bx, by = xy[j]
+        dx, dy = bx - ax, by - ay
+        L2 = dx * dx + dy * dy
+        worst, wi = 0.0, -1
+        for k in range(i + 1, j):
+            px, py = xy[k]
+            if L2 == 0:
+                d = math.hypot(px - ax, py - ay)
+            else:
+                t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / L2))
+                d = math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+            if d > worst:
+                worst, wi = d, k
+        if wi >= 0 and worst > tol_m:
+            keep[wi] = True
+            stack.append((i, wi))
+            stack.append((wi, j))
+    return [p for p, k in zip(points, keep) if k]
 
 
 def difficulty(stats):
