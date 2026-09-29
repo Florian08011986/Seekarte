@@ -3,9 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#0d1117" id="meta-theme">
 <title>Blindsee · Tourenkarte</title>
 <meta name="description" content="Interaktive 3D-Karte mit echten Rundwegen rund um den Blindsee in Tirol.">
+<meta property="og:title" content="Blindsee · Tourenkarte">
+<meta property="og:description" content="Interaktive 3D-Karte mit echten Rundwegen rund um den Blindsee in Tirol — Kinderwagen-Modus, Schattenzeiten, GPX-Export.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="blindsee_screenshot.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -286,10 +294,62 @@ body.kw .sh-h{font-size:10px}
   .wiz{border-radius:22px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- Light mode ---------- */
+body.light{--bg:#f5f7fa;--surface:#ffffff;--surface-2:#eef1f6;--line:#d0d5dd;
+  --text:#1a1d23;--muted:#5a6270;--faint:#8891a0;
+  --accent:#0969da;--accent-soft:rgba(9,105,218,.1);
+  --green:#1a7f37;--amber:#9a6700;--red:#cf222e}
+body.light .maplibregl-ctrl-attrib{background:rgba(255,255,255,.7);color:#5a6270}
+body.light .topbar{background:linear-gradient(180deg,rgba(245,247,250,.92),rgba(245,247,250,0))}
+body.light .g-top{background:linear-gradient(180deg,rgba(245,247,250,.85),transparent)}
+body.light .g-bottom{background:linear-gradient(0deg,rgba(245,247,250,.9),transparent)}
+body.light .icon-btn,body.light .g-chip,body.light .compass,body.light .t-bar{
+  background:rgba(255,255,255,.92);border-color:var(--line)}
+body.light .cta{color:#fff}
+body.light .btn-main{color:#fff}
+
+/* ---------- Offline banner ---------- */
+.offline-bar{display:none;position:fixed;top:0;left:0;right:0;z-index:80;
+  padding:calc(env(safe-area-inset-top,0px) + 6px) 16px 6px;
+  background:var(--amber);color:#fff;font-size:12px;font-weight:700;text-align:center}
+body.is-offline .offline-bar{display:block}
+body.is-offline .topbar{top:28px}
+
+/* ---------- Map loading ---------- */
+.map-loading{position:absolute;inset:0;z-index:15;display:grid;place-items:center;
+  background:var(--bg);transition:opacity .6s}
+.map-loading.done{opacity:0;pointer-events:none}
+
+/* ---------- Naming modal ---------- */
+.name-modal{position:fixed;inset:0;z-index:65;display:flex;align-items:center;
+  justify-content:center;background:rgba(9,12,16,.8);backdrop-filter:blur(8px)}
+.name-modal[hidden]{display:none}
+.name-modal-box{width:min(340px,90vw);background:var(--surface);border:1px solid var(--line);
+  border-radius:18px;padding:20px;box-shadow:0 16px 48px rgba(0,0,0,.4)}
+.name-modal-box h3{font-size:16px;font-weight:700;margin:0 0 12px}
+.name-modal-box input{width:100%;height:42px;border-radius:10px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--text);font:inherit;font-size:14px;padding:0 12px}
+.name-modal-box input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.name-modal-foot{display:flex;gap:8px;margin-top:14px}
+.name-modal-foot .btn{flex:1}
+
+/* ---------- Date picker (shade) ---------- */
+.date-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.date-row input[type="date"]{height:34px;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--text);font:inherit;font-size:12px;padding:0 8px;
+  color-scheme:dark}
+body.light .date-row input[type="date"]{color-scheme:light}
+.date-row .chip{margin:0}
+
+/* ---------- Geolocation ---------- */
+.geo-dot{width:16px;height:16px;border-radius:99px;background:var(--accent);
+  border:3px solid #fff;box-shadow:0 0 0 2px var(--accent),0 2px 8px rgba(0,0,0,.4)}
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div class="offline-bar" id="offline-bar">Kein Internet — Karte arbeitet mit gespeicherten Daten</div>
+<div id="map"><div class="map-loading" id="map-load"><div><div class="spin"></div>Karte wird geladen…</div></div></div>
 
 <header class="topbar">
   <div class="brand">Blindsee<small id="brand-sub">Tirol · 1093 m</small></div>
@@ -298,6 +358,9 @@ body.kw .sh-h{font-size:10px}
           title="Kinderwagen-Modus">👶</button>
   <button class="icon-btn kw-toggle" id="btn-contour" aria-pressed="false"
           title="Höhenlinien">⛰</button>
+  <button class="icon-btn" id="btn-share" title="Teilen">↗</button>
+  <button class="icon-btn" id="btn-locate" title="Mein Standort">◎</button>
+  <button class="icon-btn" id="btn-theme" title="Hell / Dunkel">☀</button>
   <button class="icon-btn" id="btn-reset" title="Übersicht">⌂</button>
 </header>
 
@@ -372,12 +435,64 @@ body.kw .sh-h{font-size:10px}
 
 <div class="loading" id="loading" hidden><div><div class="spin"></div><span id="loading-txt">Gelände wird geladen…</span></div></div>
 
+<div class="name-modal" id="name-modal" hidden>
+  <div class="name-modal-box">
+    <h3 id="name-modal-title">Punkt benennen</h3>
+    <input type="text" id="name-modal-input" placeholder="Name eingeben…" autocomplete="off">
+    <div class="name-modal-foot">
+      <button class="btn btn-ghost" id="name-modal-cancel">Abbrechen</button>
+      <button class="btn btn-main" id="name-modal-ok">Setzen</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const DATA = __DATA__;
 const ROUTES = DATA.routes, SPOTS = DATA.hotspots, LAKE = DATA.lake;
 const SPOT_BY_ID = Object.fromEntries(SPOTS.map(s => [s.id, s]));
 const CAT_ICON = {beach:"🏖", nature:"🌲", photo:"📷", map:"🧭", "360":"🔭"};
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---- Performance: wiederverwendbare Distanzberechnung ---- */
+function segDist(a, b){
+  const dx = (b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180);
+  const dy = (b[1] - a[1]) * 110540;
+  return Math.hypot(dx, dy);
+}
+function ptDist(lat, lon, p){
+  const dx = (p[0] - lon) * 111320 * Math.cos(lat * Math.PI / 180);
+  const dy = (p[1] - lat) * 110540;
+  return Math.hypot(dx, dy);
+}
+
+/* ---- Performance: lineLength mit Cache ---- */
+const _lineLenCache = new WeakMap();
+function lineLength(coords){
+  if (_lineLenCache.has(coords)) return _lineLenCache.get(coords);
+  let d = 0;
+  for (let i = 1; i < coords.length; i++) d += segDist(coords[i-1], coords[i]);
+  _lineLenCache.set(coords, d);
+  return d;
+}
+
+/* ---- Performance: deriveRoute Cache (invalidiert bei custom-Änderung) ---- */
+const _deriveCache = {};
+let _deriveCacheVer = 0;
+function invalidateDeriveCache(){ _deriveCacheVer++; }
+
+/* ---- Map loading fade-out ---- */
+function fadeMapLoading(){
+  const el = document.getElementById("map-load");
+  if (el){ el.classList.add("done"); setTimeout(() => el.remove(), 800); }
+}
+
+/* ---- Offline Detection ---- */
+function updateOnline(){
+  document.body.classList.toggle("is-offline", !navigator.onLine);
+}
+window.addEventListener("online", updateOnline);
+window.addEventListener("offline", updateOnline);
+updateOnline();
 
 /* ============================ Karte ============================ */
 const map = new maplibregl.Map({
@@ -514,6 +629,7 @@ map.on("load", () => {
 
   renderRoutes(); renderSpots(); addSpotMarkers();
   selectRoute(ROUTES.find(r => r.id === "see") || ROUTES[0], {fly:true});
+  fadeMapLoading();
 });
 
 function emptyFC(){ return {type:"FeatureCollection", features:[]}; }
@@ -716,24 +832,14 @@ function applyFilters(){
 /* Variante, Startpunkt und Abstecher werden nicht in die Grunddaten
    geschrieben, sondern bei jeder Anzeige daraufgelegt - so bleibt die
    berechnete Runde unveraendert und alles ist jederzeit ruecksetzbar. */
-function lineLength(coords){
-  let d = 0;
-  for (let i = 1; i < coords.length; i++){
-    const a = coords[i - 1], b = coords[i];
-    d += Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
-                    (b[1] - a[1]) * 110540);
-  }
-  return d;
-}
+/* lineLength ist oben mit WeakMap-Cache definiert */
 
 function rotateCoords(coords, startM){
   const total = lineLength(coords);
   if (!startM || startM <= 0 || startM >= total) return coords.slice();
   let acc = 0, idx = 1, t = 0;
   for (let i = 1; i < coords.length; i++){
-    const a = coords[i - 1], b = coords[i];
-    const seg = Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
-                           (b[1] - a[1]) * 110540);
+    const seg = segDist(coords[i - 1], coords[i]);
     if (acc + seg >= startM){ idx = i; t = seg ? (startM - acc) / seg : 0; break; }
     acc += seg;
   }
@@ -749,6 +855,8 @@ function shiftKm(v, startKm, totalKm){
 }
 
 function deriveRoute(base){
+  const cacheKey = base.id + ":" + _deriveCacheVer;
+  if (_deriveCache[base.id] && _deriveCache[base.id]._v === _deriveCacheVer) return _deriveCache[base.id];
   const c = customFor(base.id);
   const vs = variantsOf(base.id);
   const variant = c.variant > 0 && vs[c.variant - 1] ? vs[c.variant - 1] : null;
@@ -791,6 +899,8 @@ function deriveRoute(base){
       ? `${Math.floor(r.minutes / 60)}h ${String(r.minutes % 60).padStart(2, "0")}m`
       : `${r.minutes} Min`;
   }
+  r._v = _deriveCacheVer;
+  _deriveCache[base.id] = r;
   return r;
 }
 
@@ -800,6 +910,7 @@ function spurKey(sp){ return `${sp.kind}:${sp.lat},${sp.lon}`; }
 function refreshActive(opt){
   if (!activeBase) return;
   saveJSON("blindsee-custom", custom);
+  invalidateDeriveCache();
   selectRoute(activeBase, opt || {});
   renderFilters();
 }
@@ -930,13 +1041,14 @@ function drawProfile(r){
     `<line id="prof-cursor" x1="0" y1="0" x2="0" y2="${H}" stroke="#fff" stroke-width="1" opacity="0"/>`;
 
   const readout = document.getElementById("prof-readout");
+  let cursorRef = null;
   const move = ev => {
     const rect = svg.getBoundingClientRect();
     const cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
     const frac = Math.max(0, Math.min(1, cx / rect.width));
     const i = Math.round(frac * (zs.length - 1));
-    const cur = svg.querySelector("#prof-cursor");
-    if (cur){ cur.setAttribute("x1", X(i)); cur.setAttribute("x2", X(i)); cur.setAttribute("opacity", "0.9"); }
+    if (!cursorRef) cursorRef = svg.querySelector("#prof-cursor");
+    if (cursorRef){ cursorRef.setAttribute("x1", X(i)); cursorRef.setAttribute("x2", X(i)); cursorRef.setAttribute("opacity", "0.9"); }
     const g = i > 0 ? Math.abs(zs[i] - zs[i - 1]) / Math.max(1, segM) * 100 : 0;
     if (readout) readout.innerHTML =
       `<b>km ${(frac * r.km).toFixed(2).replace(".", ",")}</b> · ${Math.round(zs[i])} m ü. NN · ` +
@@ -947,14 +1059,16 @@ function drawProfile(r){
     if (ev.cancelable) ev.preventDefault();
   };
   const leave = () => {
-    const cur = svg.querySelector("#prof-cursor");
-    if (cur) cur.setAttribute("opacity", "0");
+    if (!cursorRef) cursorRef = svg.querySelector("#prof-cursor");
+    if (cursorRef) cursorRef.setAttribute("opacity", "0");
     const src = map.getSource("profpos");
     if (src) src.setData(emptyFC());
     if (readout) readout.innerHTML = profLegend();
   };
   svg.onmousemove = move; svg.onmouseleave = leave;
-  svg.ontouchstart = move; svg.ontouchmove = move; svg.ontouchend = leave;
+  svg.addEventListener("touchstart", move, {passive:false});
+  svg.addEventListener("touchmove", move, {passive:false});
+  svg.ontouchend = leave;
   if (readout) readout.innerHTML = profLegend();
 }
 
@@ -1050,11 +1164,7 @@ function routeGPX(r){
   const total = lineLength(r.coords) || 1;
   let acc = 0;
   const pts = r.coords.map((c, i) => {
-    if (i > 0){
-      const a = r.coords[i - 1];
-      acc += Math.hypot((c[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
-                        (c[1] - a[1]) * 110540);
-    }
+    if (i > 0) acc += segDist(r.coords[i - 1], c);
     const ele = elevAlong(r, acc / total);
     return `   <trkpt lat="${c[1].toFixed(6)}" lon="${c[0].toFixed(6)}">` +
            (ele === null ? "" : `<ele>${ele.toFixed(1)}</ele>`) + `</trkpt>`;
@@ -1098,8 +1208,7 @@ function pointAtOn(r, distM){
   let acc = 0;
   for (let i = 1; i < r.coords.length; i++){
     const a = r.coords[i - 1], b = r.coords[i];
-    const seg = Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
-                           (b[1] - a[1]) * 110540);
+    const seg = segDist(a, b);
     if (acc + seg >= distM){
       const t = seg ? (distM - acc) / seg : 0;
       return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
@@ -1149,10 +1258,8 @@ function nearestKmOnRoute(r, lat, lon){
   let acc = 0, bd = Infinity, bat = 0;
   for (let i = 1; i < r.coords.length; i++){
     const a = r.coords[i - 1], b = r.coords[i];
-    const seg = Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180),
-                           (b[1] - a[1]) * 110540);
-    const d = Math.hypot((a[0] - lon) * 111320 * Math.cos(lat * Math.PI / 180),
-                         (a[1] - lat) * 110540);
+    const seg = segDist(a, b);
+    const d = ptDist(lat, lon, a);
     if (d < bd){ bd = d; bat = acc; }
     acc += seg;
   }
@@ -1285,11 +1392,36 @@ function beginAddPoint(kind){
     `Tippe auf die Karte, um „${k ? k.t : kind}" zu setzen — nochmal tippen bricht ab`;
 }
 
-map.on("click", e => {
+/* ---- Naming-Modal statt prompt() ---- */
+let _nameResolve = null;
+function askName(title, def){
+  return new Promise(resolve => {
+    _nameResolve = resolve;
+    const modal = document.getElementById("name-modal");
+    document.getElementById("name-modal-title").textContent = title;
+    const inp = document.getElementById("name-modal-input");
+    inp.value = def || "";
+    modal.hidden = false;
+    setTimeout(() => inp.focus(), 60);
+  });
+}
+document.getElementById("name-modal-ok").addEventListener("click", () => {
+  const v = document.getElementById("name-modal-input").value.trim();
+  document.getElementById("name-modal").hidden = true;
+  if (_nameResolve) _nameResolve(v || null);
+  _nameResolve = null;
+});
+document.getElementById("name-modal-cancel").addEventListener("click", () => {
+  document.getElementById("name-modal").hidden = true;
+  if (_nameResolve) _nameResolve(null);
+  _nameResolve = null;
+});
+
+map.on("click", async e => {
   if (!addKind) return;
   const k = MY_KINDS.find(x => x.k === addKind) || {t:"Punkt"};
-  const name = prompt(`Name für den Punkt (${k.t}):`, k.t);
   map.getCanvas().classList.remove("picking");
+  const name = await askName(`Name für ${k.t}:`, k.t);
   if (name){
     myPoints.push({id:"p" + Date.now(), kind:addKind, name:name,
                    lat:e.lngLat.lat, lon:e.lngLat.lng});
@@ -1442,8 +1574,6 @@ function shadeGeoJSON(route, mask){
   let dist = 0, run = [route.coords[0]], cur = null;
   for (let i = 1; i < route.coords.length; i++){
     const a = route.coords[i - 1], b = route.coords[i];
-    const dx = (b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180);
-    const dy = (b[1] - a[1]) * 110540;
     const idx = ((Math.round((dist + shift) / step) % mask.length) + mask.length) % mask.length;
     const state = mask[idx];
     if (cur === null) cur = state;
@@ -1453,7 +1583,7 @@ function shadeGeoJSON(route, mask){
       run = [a]; cur = state;
     }
     run.push(b);
-    dist += Math.hypot(dx, dy);
+    dist += segDist(a, b);
   }
   if (run.length > 1)
     feats.push({type:"Feature", geometry:{type:"LineString", coordinates:run},
@@ -1499,6 +1629,10 @@ function shadeStrip(r){
       ${best ? `Am schattigsten ist es gegen ${best.h}:00 Uhr (${best.pct} %).` : ""}
       Gerechnet für ${String(d).padStart(2, "0")}.${String(m + 1).padStart(2, "0")}.${y}
       aus Geländehorizont und Waldflächen.
+    </div>
+    <div class="date-row">
+      <input type="date" id="shade-date" value="${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}">
+      <button class="chip" id="shade-today">Heute</button>
     </div>`;
 }
 
@@ -1509,6 +1643,16 @@ function bindShadeStrip(r){
       renderDetail(r);
       paintShade(r);
     }));
+  const dp = document.getElementById("shade-date");
+  if (dp) dp.addEventListener("change", () => {
+    const parts = dp.value.split("-");
+    if (parts.length === 3) shadeDate = new Date(+parts[0], +parts[1]-1, +parts[2]);
+    renderDetail(r); paintShade(r);
+  });
+  const tb = document.getElementById("shade-today");
+  if (tb) tb.addEventListener("click", () => {
+    shadeDate = new Date(); renderDetail(r); paintShade(r);
+  });
 }
 
 function paintShade(r){
@@ -1550,10 +1694,7 @@ function setTourLineStyle(on){
 function buildTourIndex(r){
   tourCum = [0];
   for (let i = 1; i < r.coords.length; i++){
-    const a = r.coords[i - 1], b = r.coords[i];
-    const dx = (b[0] - a[0]) * 111320 * Math.cos(a[1] * Math.PI / 180);
-    const dy = (b[1] - a[1]) * 110540;
-    tourCum.push(tourCum[i - 1] + Math.hypot(dx, dy));
+    tourCum.push(tourCum[i - 1] + segDist(r.coords[i - 1], r.coords[i]));
   }
   tourLen = tourCum[tourCum.length - 1];
 }
@@ -1669,9 +1810,7 @@ function applyTourCamera(){
 function nearestSpot(p){
   let best = null, bd = 120;
   for (const s of SPOTS){
-    const dx = (s.lon - p[0]) * 111320 * Math.cos(p[1] * Math.PI / 180);
-    const dy = (s.lat - p[1]) * 110540;
-    const d = Math.hypot(dx, dy);
+    const d = ptDist(p[1], p[0], [s.lon, s.lat]);
     if (d < bd){ bd = d; best = s; }
   }
   return best;
@@ -1851,6 +1990,16 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   grip.addEventListener("touchend", end);
   grip.addEventListener("mousedown", start);
   window.addEventListener("mouseup", e => { if (dragging) end(e); });
+  /* Desktop: Mausrad am Grip bewegt das Sheet auf/ab */
+  grip.addEventListener("wheel", e => {
+    e.preventDefault();
+    const order = ["peek", "half", "full"];
+    let i = order.indexOf(sheet.dataset.state);
+    if (i < 0) i = 0;
+    if (e.deltaY < 0) i = Math.min(order.length - 1, i + 1);
+    else if (e.deltaY > 0) i = Math.max(0, i - 1);
+    setSheet(order[i]);
+  }, {passive:false});
 })();
 
 document.getElementById("btn-kw").addEventListener("click", () => {
@@ -2140,6 +2289,63 @@ function applyWizard(){
     usable.length ? `${usable.length} von ${ROUTES.length} Runden passen zu deiner Auswahl`
                   : "Keine Runde erfüllt alle Kriterien — hier die nächstbesten";
 }
+
+/* ============================ Light / Dark Mode ============================ */
+let lightMode = false;
+try { lightMode = localStorage.getItem("blindsee-light") === "1"; } catch(e){}
+if (lightMode) applyTheme(true, false);
+
+function applyTheme(light, save){
+  lightMode = light;
+  document.body.classList.toggle("light", light);
+  document.getElementById("btn-theme").textContent = light ? "🌙" : "☀";
+  document.getElementById("meta-theme").setAttribute("content", light ? "#f5f7fa" : "#0d1117");
+  if (save) try { localStorage.setItem("blindsee-light", light ? "1" : "0"); } catch(e){}
+}
+
+document.getElementById("btn-theme").addEventListener("click", () => {
+  applyTheme(!lightMode, true);
+});
+
+/* ============================ Teilen (Web Share API) ============================ */
+document.getElementById("btn-share").addEventListener("click", async () => {
+  const r = activeRoute;
+  const title = r ? `${r.name} — ${r.km.toFixed(1).replace(".",",")} km Runde am Blindsee` : "Blindsee Tourenkarte";
+  const text = r ? `${r.name}: ${r.km.toFixed(2).replace(".",",")} km, ${r.ascent_m} Hm, ${r.duration}. ${r.desc}` : "";
+  const url = location.href;
+  if (navigator.share){
+    try { await navigator.share({title, text, url}); } catch(e){}
+  } else {
+    // Fallback: in Zwischenablage kopieren
+    try {
+      await navigator.clipboard.writeText(`${title}\n${text}\n${url}`);
+      const btn = document.getElementById("btn-share");
+      btn.textContent = "✓"; setTimeout(() => btn.textContent = "↗", 1500);
+    } catch(e){}
+  }
+});
+
+/* ============================ Geolocation ============================ */
+let geoMarker = null;
+document.getElementById("btn-locate").addEventListener("click", () => {
+  if (!("geolocation" in navigator)){ return; }
+  const btn = document.getElementById("btn-locate");
+  btn.textContent = "…";
+  navigator.geolocation.getCurrentPosition(pos => {
+    const {latitude: lat, longitude: lon} = pos.coords;
+    btn.textContent = "◎";
+    if (geoMarker) geoMarker.remove();
+    const el = document.createElement("div");
+    el.className = "geo-dot";
+    geoMarker = new maplibregl.Marker({element:el, anchor:"center"})
+      .setLngLat([lon, lat]).addTo(map);
+    map.flyTo({center:[lon, lat], zoom:16, pitch:50, duration:reduceMotion ? 0 : 1200});
+  }, err => {
+    btn.textContent = "◎";
+    btn.title = "Standort nicht verfügbar";
+  }, {enableHighAccuracy:true, timeout:8000});
+});
+
 </script>
 </body>
 </html>
