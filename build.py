@@ -10,6 +10,7 @@ import os
 import sys
 import subprocess
 
+import kartenbild
 import route_engine
 import shade
 
@@ -92,6 +93,10 @@ def main():
         json.dump(variants, f, ensure_ascii=False, separators=(",", ":"))
     print(f"[build] variants.json: {os.path.getsize(vpath)/1024:.0f} KB, "
           f"{sum(len(v) for v in variants.values())} Varianten")
+
+    # Flaechen und Wege fuer die gezeichnete Karte erzeugen. Eigene Datei,
+    # damit index.html schlank bleibt; die Seite laedt sie nach.
+    kartenbild.main()
 
     data = {"routes": routes, "hotspots": hotspots, "lake": lake}
     tpl = open(os.path.join(HERE, "template.html"), encoding="utf-8").read()

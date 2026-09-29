@@ -69,6 +69,11 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
 .tabs{display:flex;gap:4px;padding:0 12px 10px;flex:none}
 .tab{flex:1;height:34px;border-radius:10px;font-size:13px;font-weight:600;color:var(--muted);
   background:var(--surface-2);border:1px solid transparent}
+/* Im Auswahlzustand gibt es nichts umzuschalten und nichts zu wechseln -
+   also sind Reiter und "Runde wechseln" dort ausgeblendet. */
+body.auswahl .tabs{display:none}
+body.auswahl #btn-change{display:none}
+body.auswahl .sheet{--sheet-peek:100%}
 .tab[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);
   border-color:rgba(74,168,255,.3)}
 .panel{display:none;overflow-y:auto;padding:0 12px 20px;flex:1;-webkit-overflow-scrolling:touch}
@@ -361,11 +366,7 @@ body.light .date-row input[type="date"]{color-scheme:light}
 
 <header class="topbar">
   <div class="brand">Blindsee<small id="brand-sub">Tirol · 1093 m</small></div>
-  <button class="cta" id="open-wizard">Tour finden</button>
-  <button class="icon-btn kw-toggle" id="btn-kw" aria-pressed="false"
-          title="Kinderwagen-Modus">👶</button>
-  <button class="icon-btn kw-toggle" id="btn-contour" aria-pressed="false"
-          title="Höhenlinien">⛰</button>
+  <button class="cta" id="btn-change">Runde wechseln</button>
   <button class="icon-btn" id="btn-share" title="Teilen">↗</button>
   <button class="icon-btn" id="btn-locate" title="Mein Standort">◎</button>
   <button class="icon-btn" id="btn-theme" title="Hell / Dunkel">☀</button>
@@ -379,36 +380,14 @@ body.light .date-row input[type="date"]{color-scheme:light}
     <div class="sheet-sub" id="sheet-sub">Alle Touren sind Runden — Start = Ziel</div>
   </div>
   <nav class="tabs" role="tablist">
-    <button class="tab" role="tab" data-tab="routes" aria-selected="true">Runden</button>
-    <button class="tab" role="tab" data-tab="detail" aria-selected="false">Details</button>
-    <button class="tab" role="tab" data-tab="edit" aria-selected="false">Anpassen</button>
+    <button class="tab" role="tab" data-tab="detail" aria-selected="true">Die Runde</button>
     <button class="tab" role="tab" data-tab="spots" aria-selected="false">Orte</button>
   </nav>
-  <div class="panel" data-active id="panel-routes">
-    <div class="filters" id="filters"></div>
-    <div id="route-list"></div>
-  </div>
-  <div class="panel" id="panel-detail"></div>
-  <div class="panel" id="panel-edit"></div>
+  <div class="panel" id="panel-routes"><div id="route-list"></div></div>
+  <div class="panel" data-active id="panel-detail"></div>
   <div class="panel" id="panel-spots"></div>
 </section>
 
-<div class="overlay" id="wizard" hidden>
-  <div class="wiz">
-    <div class="wiz-head">
-      <div class="wiz-step-no" id="wiz-no">Schritt 1 von 4</div>
-      <h2 class="wiz-q" id="wiz-q"></h2>
-      <p class="wiz-hint" id="wiz-hint"></p>
-      <button class="wiz-x" id="wiz-close">×</button>
-    </div>
-    <div class="bar"><i id="wiz-bar" style="width:25%"></i></div>
-    <div class="wiz-body" id="wiz-body"></div>
-    <div class="wiz-foot">
-      <button class="btn btn-ghost" id="wiz-back">Zurück</button>
-      <button class="btn btn-main" id="wiz-next">Weiter</button>
-    </div>
-  </div>
-</div>
 
 <div class="ground" id="ground" hidden>
   <div class="g-top">
@@ -505,25 +484,76 @@ updateOnline();
 /* ============================ Karte ============================ */
 const map = new maplibregl.Map({
   container:"map", attributionControl:true, maxPitch:85, hash:false,
-  center:LAKE.center, zoom:14.2, pitch:48, bearing:-18, maxZoom:20.5,
+  center:LAKE.center, zoom:14.2, pitch:48, bearing:-18, maxZoom:21,
   style:{
     version:8,
     glyphs:"https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
     sources:{
-      sat:{type:"raster", tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-        tileSize:256, maxzoom:19,
-        attribution:"Luftbild © Esri, Maxar, Earthstar Geographics · Wege © OpenStreetMap-Mitwirkende · Höhen © Mapzen/AWS · Höhenlinien via maplibre-contour (BSD-3)"},
+      // Gezeichnete Karte statt Luftbild. Gemessen am 2026-09-29: das
+      // Luftbild hat ueber dem Blindsee echte Aufnahmen nur bis Zoom 20,
+      // ab 21 liefert der Dienst einen grauen Platzhalter mit HTTP 200.
+      // Eine Zeichnung hat diese Grenze nicht - sie bleibt auf jeder
+      // Zoomstufe und jeder Bildschirmdichte scharf.
+      // Die Daten kommen aus kartenbild.json (aus dem OSM-Zwischenspeicher
+      // erzeugt) und werden im load-Ereignis nachgereicht.
       dem:{type:"raster-dem", tiles:["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
-        tileSize:256, maxzoom:15, encoding:"terrarium"}
+        tileSize:256, maxzoom:15, encoding:"terrarium",
+        attribution:"Wege und Flächen © OpenStreetMap-Mitwirkende · Höhen © Mapzen/AWS · Höhenlinien via maplibre-contour (BSD-3)"},
+      wald:{type:"geojson", data:{type:"FeatureCollection",features:[]}},
+      wasser:{type:"geojson", data:{type:"FeatureCollection",features:[]}},
+      strasse:{type:"geojson", data:{type:"FeatureCollection",features:[]}},
+      fahrweg:{type:"geojson", data:{type:"FeatureCollection",features:[]}},
+      pfad:{type:"geojson", data:{type:"FeatureCollection",features:[]}}
     },
     layers:[
-      {id:"bg", type:"background", paint:{"background-color":"#0d1117"}},
-      {id:"sat", type:"raster", source:"sat"}
+      {id:"bg", type:"background", paint:{"background-color":"#121a18"}},
+      // Relief aus dem Hoehenmodell: gibt dem gezeichneten Gelaende Form,
+      // ohne dass ein Foto noetig waere.
+      {id:"relief", type:"hillshade", source:"dem", paint:{
+        "hillshade-shadow-color":"#070c0b", "hillshade-highlight-color":"#46576b",
+        "hillshade-accent-color":"#18242e", "hillshade-exaggeration":.85}},
+      {id:"wald-fill", type:"fill", source:"wald",
+        paint:{"fill-color":"#15291c","fill-opacity":.85}},
+      {id:"wald-kante", type:"line", source:"wald",
+        paint:{"line-color":"#1f3d29","line-opacity":.9,
+          "line-width":["interpolate",["linear"],["zoom"],12,.6,18,2.2]}},
+      // See im selben Vokabular wie die Route und der eigene Standort:
+      // Glimmen nach aussen, satte Flaeche, klare Akzentkante.
+      {id:"wasser-glow", type:"line", source:"wasser",
+        layout:{"line-cap":"round","line-join":"round"},
+        paint:{"line-color":"#5ec8f0","line-opacity":.13,"line-blur":7,
+          "line-width":["interpolate",["linear"],["zoom"],12,5,18,18]}},
+      {id:"wasser-fill", type:"fill", source:"wasser",
+        paint:{"fill-color":"#0e3050","fill-opacity":.92}},
+      {id:"wasser-kante", type:"line", source:"wasser",
+        layout:{"line-cap":"round","line-join":"round"},
+        paint:{"line-color":"#5ec8f0","line-opacity":.6,
+          "line-width":["interpolate",["linear"],["zoom"],12,.9,18,2.2]}},
+      {id:"strasse-linie", type:"line", source:"strasse",
+        layout:{"line-cap":"round","line-join":"round"},
+        paint:{"line-color":"#3c4653","line-opacity":.9,
+          "line-width":["interpolate",["linear"],["zoom"],12,1.2,18,6]}},
+      {id:"fahrweg-linie", type:"line", source:"fahrweg",
+        layout:{"line-cap":"round","line-join":"round"},
+        paint:{"line-color":"#333d49","line-opacity":.85,
+          "line-width":["interpolate",["linear"],["zoom"],12,.8,18,3.4]}},
+      {id:"pfad-linie", type:"line", source:"pfad",
+        layout:{"line-cap":"round","line-join":"round"},
+        paint:{"line-color":"#4b5866","line-opacity":.8,"line-dasharray":[2,2],
+          "line-width":["interpolate",["linear"],["zoom"],12,.6,18,2.2]}}
     ],
     terrain:{source:"dem", exaggeration:1.0}
   }
 });
 map.addControl(new maplibregl.NavigationControl({visualizePitch:true}), "bottom-left");
+
+/* Lesezugang fuer automatisierte Sichtpruefungen. `const map` liegt nicht auf
+   window, und window.map ist das DIV mit der id "map" - ein Zugriff von aussen
+   scheitert sonst mit "map.getStyle is not a function". */
+window.__app = {
+  get map(){ return map; },
+  get route(){ return activeRoute; },
+};
 map.touchZoomRotate.enableRotation();
 
 let activeRoute = null, activeBase = null, activeSpot = null;
@@ -569,8 +599,10 @@ const filters = {len:"all", wagen:"all", props:[]};
 
 /* Kinderwagen-Modus: blendet Rastpunkte ein, vergroessert die Bedienflaechen
    und stellt ueberall die Kinderwagen-Ampel in den Vordergrund. */
-let kwMode = false;
-try { kwMode = localStorage.getItem("blindsee-kw") === "1"; } catch(e){}
+/* Die Kinderwagen-Angaben (Ampel, Baenke, Schiebestellen, Rastpunkte) sind
+   Information, kein Komfort - sie stehen jetzt immer da, statt hinter einem
+   Schalter zu liegen. Aus "Regler weglassen, Information behalten". */
+const kwMode = true;
 
 const AMPEL_TEXT = {green:"Kinderwagen: problemlos", yellow:"Kinderwagen: machbar",
                     red:"Kinderwagen: schwierig"};
@@ -584,6 +616,15 @@ map.on("load", () => {
     "sky-color":"#7fb2e5", "horizon-color":"#dbe8f4", "fog-color":"#c4d6e6",
     "sky-horizon-blend":.65, "horizon-fog-blend":.55, "fog-ground-blend":.3
   });
+  // Flaechen und Wege der gezeichneten Karte nachreichen. Getrennte Datei,
+  // damit index.html schlank bleibt - komprimiert rund 38 KB.
+  fetch("kartenbild.json").then(r => r.json()).then(k => {
+    for (const name of ["wald","wasser","strasse","fahrweg","pfad"]){
+      const q = map.getSource(name);
+      if (q && k[name]) q.setData(k[name]);
+    }
+  }).catch(() => { /* ohne Flaechen bleibt die Karte bedienbar */ });
+
   map.addSource("route", {type:"geojson", data:emptyFC(), lineMetrics:true});
   map.addLayer({id:"route-glow", type:"line", source:"route",
     layout:{"line-cap":"round","line-join":"round"},
@@ -615,8 +656,7 @@ map.on("load", () => {
     paint:{"circle-radius":5,"circle-color":"#3fb950","circle-stroke-width":1.5,
            "circle-stroke-color":"#0d1117"}});
 
-  document.getElementById("btn-kw").setAttribute("aria-pressed", String(kwMode));
-  document.body.classList.toggle("kw", kwMode);
+  document.body.classList.add("kw");
   makeArrowIcon();
   map.addLayer({id:"route-arrows", type:"symbol", source:"route",
     layout:{"symbol-placement":"line", "symbol-spacing":70, "icon-image":"dir-arrow",
@@ -637,6 +677,7 @@ map.on("load", () => {
 
   renderRoutes(); renderSpots(); addSpotMarkers();
   selectRoute(ROUTES.find(r => r.id === "see") || ROUTES[0], {fly:true});
+  zeigeAuswahl();          // Start = Auswahl, die Karte liegt schon darunter
   fadeMapLoading();
 });
 
@@ -730,8 +771,10 @@ function renderRoutes(list, reasons){
       ${reasons && reasons[r.id] ? `<div class="why">${reasons[r.id]}</div>` : ""}
     </div>`).join("");
   el.querySelectorAll("[data-route]").forEach(c =>
-    c.addEventListener("click", () => selectRoute(ROUTES.find(r => r.id === c.dataset.route), {fly:true})));
-  renderFilters();
+    c.addEventListener("click", () => {
+      selectRoute(ROUTES.find(r => r.id === c.dataset.route), {fly:true});
+      zeigeRunde();   // Auswahl getroffen -> weiter zur Runde
+    }));
 }
 
 function selectRoute(base, opt){
@@ -758,7 +801,6 @@ function selectRoute(base, opt){
   if (cards.length) cards.forEach(c => c.classList.toggle("selected", c.dataset.route === r.id));
   else renderRoutes();
   renderDetail(r);
-  renderEdit(r);
   if (opt && opt.fly){
     const b = new maplibregl.LngLatBounds();
     r.coords.forEach(c => b.extend(c));
@@ -767,75 +809,9 @@ function selectRoute(base, opt){
   }
 }
 
-/* ============================ Filter ============================ */
-const LEN_FILTERS = [
-  {v:"all",   t:"Alle"},
-  {v:"short", t:"bis 2 km",  test:r => r.km <= 2},
-  {v:"mid",   t:"2–4 km",    test:r => r.km > 2 && r.km <= 4},
-  {v:"long",  t:"über 4 km", test:r => r.km > 4},
-];
-const WAGEN_FILTERS = [
-  {v:"all",    t:"Egal"},
-  {v:"green",  t:"nur problemlos", test:r => r.stroller_grade === "green"},
-  {v:"ok",     t:"auch machbar",   test:r => r.stroller_grade !== "red"},
-];
-const PROP_FILTERS = [
-  {v:"water", t:"am Wasser",   test:r => r.lake_share >= .5},
-  {v:"shade", t:"Schatten",    test:r => r.shade_share >= .3},
-  {v:"bench", t:"viele Bänke", test:r => r.benches >= 3},
-  {v:"spots", t:"viel zu sehen", test:r => r.hotspots.length >= 3},
-  {v:"flat",  t:"flach",       test:r => r.steep_share < .06},
-];
-
-function passesFilters(r){
-  const lf = LEN_FILTERS.find(f => f.v === filters.len);
-  if (lf && lf.test && !lf.test(r)) return false;
-  const wf = WAGEN_FILTERS.find(f => f.v === filters.wagen);
-  if (wf && wf.test && !wf.test(r)) return false;
-  for (const p of filters.props){
-    const pf = PROP_FILTERS.find(f => f.v === p);
-    if (pf && !pf.test(r)) return false;
-  }
-  return true;
-}
-
-function renderFilters(){
-  const el = document.getElementById("filters");
-  if (!el) return;
-  const hits = ROUTES.map(deriveRoute).filter(passesFilters).length;
-  el.innerHTML = `
-    <div class="flabel">Länge</div>
-    <div class="frow">${LEN_FILTERS.map(f =>
-      `<button class="chip ${filters.len === f.v ? "on" : ""}" data-len="${f.v}">${f.t}</button>`).join("")}</div>
-    <div class="flabel">Kinderwagen</div>
-    <div class="frow">${WAGEN_FILTERS.map(f =>
-      `<button class="chip ${filters.wagen === f.v ? "on" : ""}" data-wagen="${f.v}">${f.t}</button>`).join("")}</div>
-    <div class="flabel">Eigenschaften</div>
-    <div class="frow">${PROP_FILTERS.map(f =>
-      `<button class="chip ${filters.props.includes(f.v) ? "on" : ""}" data-prop="${f.v}">${f.t}</button>`).join("")}</div>
-    <div class="fcount">${hits} von ${ROUTES.length} Runden passen${
-      hits === 0 ? " — Filter zu eng" : ""}</div>`;
-  el.querySelectorAll("[data-len]").forEach(b => b.addEventListener("click", () => {
-    filters.len = b.dataset.len; applyFilters();
-  }));
-  el.querySelectorAll("[data-wagen]").forEach(b => b.addEventListener("click", () => {
-    filters.wagen = b.dataset.wagen; applyFilters();
-  }));
-  el.querySelectorAll("[data-prop]").forEach(b => b.addEventListener("click", () => {
-    const v = b.dataset.prop;
-    filters.props = filters.props.includes(v)
-      ? filters.props.filter(x => x !== v) : filters.props.concat(v);
-    applyFilters();
-  }));
-}
-
-function applyFilters(){
-  const list = ROUTES.filter(r => passesFilters(deriveRoute(r)));
-  renderRoutes(list.length ? list : []);
-  if (list.length && (!activeBase || !list.includes(activeBase)))
-    selectRoute(list[0], {fly:true});
-}
-
+/* Filter-Abschnitt entfernt (2026-09-29): Laenge, Kinderwagen-Ampel und
+   Eigenschaften waren Regler ueber der Runden-Liste. Die Angaben stehen
+   weiterhin auf jeder Karte - nur filtern kann man nicht mehr. */
 /* ==================== Abgeleitete Runde ==================== */
 /* Variante, Startpunkt und Abstecher werden nicht in die Grunddaten
    geschrieben, sondern bei jeder Anzeige daraufgelegt - so bleibt die
@@ -920,7 +896,6 @@ function refreshActive(opt){
   saveJSON("blindsee-custom", custom);
   invalidateDeriveCache();
   selectRoute(activeBase, opt || {});
-  renderFilters();
 }
 
 function renderDetail(r){
@@ -1118,8 +1093,14 @@ async function setupContours(){
     });
     map.addLayer({id:"contour-line", type:"line", source:"contours",
       "source-layer":"contours",
-      paint:{"line-color":"rgba(255,255,255,.5)",
-             "line-width":["match", ["get","level"], 1, 1.2, 0.6]}}, "route-glow");
+      // Gedaempft: bei .5 uebertoenten die Hoehenlinien Wald und See und die
+      // Karte las sich nur noch als Liniengewirr. Haupthoehenlinien bleiben
+      // kraeftiger als die Zwischenlinien, und weit draussen blenden sie aus.
+      paint:{"line-color":["match", ["get","level"], 1,
+               "rgba(233,238,245,.34)", "rgba(233,238,245,.16)"],
+             "line-width":["match", ["get","level"], 1, 1.1, 0.6],
+             "line-opacity":["interpolate",["linear"],["zoom"], 12,0, 13.5,1]}},
+      "route-glow");
     map.addLayer({id:"contour-label", type:"symbol", source:"contours",
       "source-layer":"contours", filter:[">", ["get","level"], 0],
       layout:{"symbol-placement":"line", "text-size":10,
@@ -1133,26 +1114,17 @@ async function setupContours(){
   return contourLoading;
 }
 
-async function toggleContours(){
-  const btn = document.getElementById("btn-contour");
-  if (!contourReady){
-    btn.textContent = "…";
-    const ok = await setupContours();
-    btn.textContent = "⛰";
-    if (!ok){ btn.title = "Höhenlinien konnten nicht geladen werden"; return; }
-    contourOn = true;
-  } else {
-    contourOn = !contourOn;
-    ["contour-line", "contour-label"].forEach(id => {
-      if (map.getLayer(id))
-        map.setLayoutProperty(id, "visibility", contourOn ? "visible" : "none");
-    });
-  }
-  btn.setAttribute("aria-pressed", String(contourOn));
-  try { localStorage.setItem("blindsee-contour", contourOn ? "1" : "0"); } catch(e){}
+/* Hoehenlinien haben keinen Schalter mehr. In der gezeichneten Karte sind sie
+   die wichtigste Detailquelle und ebenfalls Vektor, also auf jeder Zoomstufe
+   scharf - es gibt keinen Grund, sie auszuschalten. */
+async function ladeHoehenlinien(){
+  if (contourReady) return true;
+  const ok = await setupContours();
+  contourOn = !!ok;
+  return contourOn;
 }
 
-document.getElementById("btn-contour").addEventListener("click", toggleContours);
+map.on("load", () => { ladeHoehenlinien(); });
 
 /* ====================== GPX-Export ======================
    Jeder ausgereifte Tourenplaner kann das, und ohne Export ist die Runde
@@ -1235,211 +1207,16 @@ function downloadGPX(r){
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
-/* ============================ Anpassen ============================ */
-function startCandidates(r){
-  const out = [];
-  out.push({at_km:0, label:"Ursprung", name:"Wie berechnet", icon:"🏁", dist:0});
-  (r.rest_points || []).filter(p => p.kind === "parking" || p.kind === "bench")
-    .forEach(p => out.push({at_km:p.at_km, label:p.label, name:p.name,
-                            icon:REST_ICON[p.kind] || "📍"}));
-  (r.hotspots || []).forEach(id => {
-    const sp = SPOT_BY_ID[id];
-    if (!sp) return;
-    const at = nearestKmOnRoute(r, sp.lat, sp.lon);
-    if (at === null) return;
-    out.push({at_km:at, label:"Ort", name:sp.name, icon:CAT_ICON[sp.category] || "📍"});
-  });
-  myPoints.forEach(mp => {
-    const at = nearestKmOnRoute(r, mp.lat, mp.lon);
-    if (at !== null) out.push({at_km:at, label:"Eigener Punkt", name:mp.name,
-                               icon:(MY_KINDS.find(k => k.k === mp.kind) || {}).i || "📌"});
-  });
-  const seen = new Set();
-  return out.filter(o => {
-    const k = o.at_km.toFixed(2);
-    if (seen.has(k)) return false;
-    seen.add(k); return true;
-  }).sort((a, b) => a.at_km - b.at_km);
-}
-
-function nearestKmOnRoute(r, lat, lon){
-  let acc = 0, bd = Infinity, bat = 0;
-  for (let i = 1; i < r.coords.length; i++){
-    const a = r.coords[i - 1], b = r.coords[i];
-    const seg = segDist(a, b);
-    const d = ptDist(lat, lon, a);
-    if (d < bd){ bd = d; bat = acc; }
-    acc += seg;
-  }
-  return bd > 250 ? null : Math.round(bat / 10) / 100;
-}
-
-function renderEdit(r){
-  const el = document.getElementById("panel-edit");
-  if (!el || !r) return;
-  if (!VARIANTS && r.variant_count > 0){
-    el.innerHTML = `<div class="empty">Streckenvarianten werden geladen…</div>`;
-    loadVariants().then(() => { if (activeBase) renderEdit(deriveRoute(activeBase)); });
-    return;
-  }
-  const c = customFor(r.id);
-  const base = activeBase;
-  const km = v => v.toFixed(2).replace(".", ",");
-
-  const vlist = variantsOf(base.id);
-  const variants = `
-    <div class="section-h">Streckenführung</div>
-    ${vlist.length ? `
-      <button class="opt-row ${c.variant === 0 ? "on" : ""}" data-var="0">
-        <span class="row-ico">①</span>
-        <span class="r-main"><span class="r-t">Standard</span>
-          <span class="r-d">${km(base.km)} km · ${base.ascent_m} Hm · ${base.duration}</span></span>
-      </button>
-      ${vlist.map((v, i) => `
-        <button class="opt-row ${c.variant === i + 1 ? "on" : ""}" data-var="${i + 1}">
-          <span class="row-ico">${["②","③","④"][i] || "◆"}</span>
-          <span class="r-main"><span class="r-t">Variante ${i + 1}</span>
-            <span class="r-d">${km(v.km)} km · ${v.ascent_m} Hm · ${v.duration}
-              ${v.lake_share >= .5 ? " · viel am Wasser" : ""}
-              ${v.shade_share >= .3 ? " · schattig" : ""}</span></span>
-        </button>`).join("")}
-      ${c.variant > 0 ? `<div class="hint-box">Für Varianten sind keine
-        Schattenzeiten berechnet — die gibt es nur für die Standardführung.</div>` : ""}`
-      : `<div class="hint-box">Für diese Länge gibt es im Wegenetz keine zweite
-         Führung, die sich wirklich unterscheidet.</div>`}`;
-
-  const cands = startCandidates(r);
-  const starts = `
-    <div class="section-h">Startpunkt</div>
-    <div class="hint-box">Die Runde wird so gedreht, dass sie hier beginnt und endet.
-      Länge und Höhenmeter bleiben gleich.</div>
-    ${cands.map(o => {
-      const d = Math.round(o.at_km * 1000);
-      const isOn = Math.abs((c.startDist || 0) - (o.dist === 0 ? 0 : d)) < 20;
-      return `<button class="opt-row ${isOn ? "on" : ""}" data-start="${o.dist === 0 ? 0 : d}">
-        <span class="row-ico">${o.icon}</span>
-        <span class="r-main"><span class="r-t">${o.name}</span>
-          <span class="r-d">${o.label}${o.dist === 0 ? "" : ` · bisher bei km ${km(o.at_km)}`}</span></span>
-        <span class="r-x">${isOn ? "AKTIV" : "START"}</span></button>`;
-    }).join("")}`;
-
-  const spurs = `
-    <div class="section-h">Abstecher</div>
-    ${(r.spurs && r.spurs.length) ? r.spurs.map(sp => {
-      const on = !!c.spurs[spurKey(sp)];
-      return `<button class="opt-row ${on ? "on" : ""}" data-spur="${spurKey(sp)}">
-        <span class="row-ico">${REST_ICON[sp.kind] || "📍"}</span>
-        <span class="r-main"><span class="r-t">${sp.name}</span>
-          <span class="r-d">Abzweig bei km ${km(sp.at_km)} · hin und zurück</span></span>
-        <span class="delta">+${sp.detour_m} m</span></button>`;
-    }).join("") : `<div class="hint-box">In Reichweite dieser Runde liegt nichts,
-      wofür sich ein Umweg über echte Wege lohnt.</div>`}`;
-
-  const mine = `
-    <div class="section-h">Eigene Punkte</div>
-    <div class="hint-box">OpenStreetMap kennt hier weder Wickelräume noch die WCs
-      am Bootshaus. Setz dir die Punkte selbst — sie bleiben auf diesem Gerät
-      gespeichert und lassen sich als Startpunkt wählen.</div>
-    <div class="addbar">${MY_KINDS.map(k =>
-      `<button class="chip" data-add="${k.k}">${k.i} ${k.t}</button>`).join("")}</div>
-    ${myPoints.length ? myPoints.map(mp => `
-      <div class="opt-row">
-        <span class="row-ico">${(MY_KINDS.find(k => k.k === mp.kind) || {}).i || "📌"}</span>
-        <span class="r-main"><span class="r-t">${mp.name}</span>
-          <span class="r-d">${mp.lat.toFixed(5)}, ${mp.lon.toFixed(5)}</span></span>
-        <button class="r-x" data-del="${mp.id}" style="color:var(--red)">LÖSCHEN</button>
-      </div>`).join("") : ""}`;
-
-  const reset = (c.variant || c.startDist || Object.keys(c.spurs).length)
-    ? `<button class="btn btn-ghost" id="btn-reset-custom" style="width:100%;margin-top:14px">
-         Anpassungen zurücksetzen</button>` : "";
-
-  el.innerHTML = variants + starts + spurs + mine + reset;
-
-  el.querySelectorAll("[data-var]").forEach(b => b.addEventListener("click", () => {
-    c.variant = +b.dataset.var; c.startDist = 0; refreshActive({fly:true});
-  }));
-  el.querySelectorAll("[data-start]").forEach(b => b.addEventListener("click", () => {
-    // die angezeigten Kilometer zaehlen ab dem aktuellen Start - fuer die
-    // Speicherung muss daraus wieder ein Wert auf der Originallinie werden
-    const pick = +b.dataset.start;
-    if (pick === 0){ c.startDist = 0; }
-    else {
-      const ringLen = lineLength(r.coords);
-      c.startDist = ((c.startDist || 0) + pick) % ringLen;
-    }
-    refreshActive({fly:true});
-  }));
-  el.querySelectorAll("[data-spur]").forEach(b => b.addEventListener("click", () => {
-    const k = b.dataset.spur;
-    if (c.spurs[k]) delete c.spurs[k]; else c.spurs[k] = 1;
-    refreshActive({});
-  }));
-  el.querySelectorAll("[data-add]").forEach(b => b.addEventListener("click", () => {
-    beginAddPoint(b.dataset.add);
-  }));
-  el.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => {
-    const i = myPoints.findIndex(x => x.id === b.dataset.del);
-    if (i >= 0){ myPoints.splice(i, 1); saveJSON("blindsee-points", myPoints);
-      renderMyMarkers(); refreshActive({}); }
-  }));
-  const rb = document.getElementById("btn-reset-custom");
-  if (rb) rb.addEventListener("click", () => {
-    custom[r.id] = {variant:0, startDist:0, spurs:{}}; refreshActive({fly:true});
-  });
-}
-
-/* ---- Eigene Punkte setzen ---- */
-let addKind = null, myMarkers = [];
-function beginAddPoint(kind){
-  addKind = kind;
-  map.getCanvas().classList.add("picking");
-  setSheet("peek");
-  const k = MY_KINDS.find(x => x.k === kind);
-  document.getElementById("sheet-sub").textContent =
-    `Tippe auf die Karte, um „${k ? k.t : kind}" zu setzen — nochmal tippen bricht ab`;
-}
-
-/* ---- Naming-Modal statt prompt() ---- */
-let _nameResolve = null;
-function askName(title, def){
-  return new Promise(resolve => {
-    _nameResolve = resolve;
-    const modal = document.getElementById("name-modal");
-    document.getElementById("name-modal-title").textContent = title;
-    const inp = document.getElementById("name-modal-input");
-    inp.value = def || "";
-    modal.hidden = false;
-    setTimeout(() => inp.focus(), 60);
-  });
-}
-document.getElementById("name-modal-ok").addEventListener("click", () => {
-  const v = document.getElementById("name-modal-input").value.trim();
-  document.getElementById("name-modal").hidden = true;
-  if (_nameResolve) _nameResolve(v || null);
-  _nameResolve = null;
-});
-document.getElementById("name-modal-cancel").addEventListener("click", () => {
-  document.getElementById("name-modal").hidden = true;
-  if (_nameResolve) _nameResolve(null);
-  _nameResolve = null;
-});
-
-map.on("click", async e => {
-  if (!addKind) return;
-  const k = MY_KINDS.find(x => x.k === addKind) || {t:"Punkt"};
-  map.getCanvas().classList.remove("picking");
-  const name = await askName(`Name für ${k.t}:`, k.t);
-  if (name){
-    myPoints.push({id:"p" + Date.now(), kind:addKind, name:name,
-                   lat:e.lngLat.lat, lon:e.lngLat.lng});
-    saveJSON("blindsee-points", myPoints);
-    renderMyMarkers();
-  }
-  addKind = null;
-  refreshActive({});
-  setSheet("half");
-});
+/* Anpassen-Abschnitt entfernt (2026-09-29): Varianten, Startpunktwahl und
+   Abstecher waren Abweichungen von den festen Runden - genau das, was raus
+   sollte. startCandidates() und nearestKmOnRoute() wurden nur von dort
+   gebraucht und sind mitgegangen. renderMyMarkers() bleibt, weil selectRoute()
+   es braucht; eigene Punkte werden weiter angezeigt und exportiert. */
+/* myMarkers stand im entfernten Anpassen-Block (`let addKind = null,
+   myMarkers = [];`). Ohne die Deklaration warf renderMyMarkers() einen
+   ReferenceError, selectRoute() brach mittendrin ab und die Startansicht
+   blieb aus - der Fehler war nur im laufenden Browser zu sehen. */
+let myMarkers = [];
 
 function renderMyMarkers(){
   myMarkers.forEach(m => m.remove());
@@ -1977,6 +1754,27 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   if (sheet.dataset.state === "peek") setSheet("half");
 }));
 
+/* ================== Zwei Zustaende statt vier Reitern ==================
+   Vorgabe: es gibt die festen Runden, man waehlt eine aus, und man kann sich
+   jederzeit umentscheiden. Mehr Bedienung soll es nicht geben.
+     auswahl - die Liste der Runden, formatfuellend
+     runde   - die gewaehlte Runde mit Details und Orten                  */
+function zeigeAuswahl(){
+  document.body.classList.add("auswahl");
+  document.getElementById("sheet-title").textContent = "Welche Runde?";
+  document.getElementById("sheet-sub").textContent =
+    ROUTES.length + " feste Runden am Blindsee — jede ist ein Rundweg, Start = Ziel";
+  showTab("routes");
+  setSheet("full");
+}
+function zeigeRunde(){
+  document.body.classList.remove("auswahl");
+  const aktiv = document.querySelector(".panel[data-active]");
+  if (!aktiv || aktiv.id === "panel-routes") showTab("detail");
+  if (sheet.dataset.state === "full") setSheet("half");
+}
+document.getElementById("btn-change").addEventListener("click", zeigeAuswahl);
+
 (function dragSheet(){
   const grip = document.getElementById("grip");
   let y0 = 0, dragging = false;
@@ -2010,26 +1808,6 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   }, {passive:false});
 })();
 
-document.getElementById("btn-kw").addEventListener("click", () => {
-  kwMode = !kwMode;
-  try { localStorage.setItem("blindsee-kw", kwMode ? "1" : "0"); } catch(e){}
-  document.getElementById("btn-kw").setAttribute("aria-pressed", String(kwMode));
-  document.body.classList.toggle("kw", kwMode);
-  document.getElementById("sheet-sub").textContent = kwMode
-    ? "Kinderwagen-Modus: Rastpunkte und Schiebestellen werden angezeigt"
-    : "Alle Touren sind Runden — Start = Ziel";
-  // Im Kinderwagen-Modus die unproblematischste Runde nach vorn holen
-  if (kwMode){
-    const best = ROUTES.filter(r => r.stroller_grade !== "red")
-                       .sort((a, b) => (a.stroller_grade === "green" ? -1 : 1) - (b.stroller_grade === "green" ? -1 : 1))[0];
-    renderRoutes();
-    selectRoute(best || activeRoute || ROUTES[0], {fly:true});
-  } else {
-    renderRoutes();
-    selectRoute(activeRoute || ROUTES[0], {fly:false});
-  }
-  if (sheet.dataset.state === "peek") setSheet("half");
-});
 
 document.getElementById("btn-reset").addEventListener("click", () => {
   if (tourOn) exitTour();
@@ -2037,267 +1815,9 @@ document.getElementById("btn-reset").addEventListener("click", () => {
   selectRoute(activeRoute || ROUTES[0], {fly:true});
 });
 
-/* ============================ Tour-Assistent ============================ */
-const QUESTIONS = [
-  {
-    key:"size", q:"Wie groß soll die Runde sein?",
-    hint:"Jede Tour ist ein geschlossener Rundweg — du kommst dort an, wo du gestartet bist. Nur die Größe unterscheidet sich.",
-    multi:false,
-    options:[
-      {v:"mini",  t:"Kleine Runde",    d:"rund 1,5 km · etwa 25 Minuten",  i:"🚶"},
-      {v:"kurz",  t:"Kurze Runde",     d:"rund 2 km · etwa 40 Minuten",    i:"🥾"},
-      {v:"see",   t:"Einmal um den See", d:"rund 3,5 km · etwa 1 Stunde",  i:"🌊"},
-      {v:"gross", t:"Große Runde",     d:"rund 6 km · etwa 2 Stunden",     i:"⛰"},
-      {v:"pano",  t:"Panorama-Runde",  d:"rund 8 km · etwa 3 Stunden",     i:"🏔"}
-    ]
-  },
-  {
-    key:"who", q:"Wer ist dabei?",
-    hint:"Das entscheidet, welche Wege überhaupt in Frage kommen — Belag, Treppen und Steigung.",
-    multi:false,
-    options:[
-      {v:"stroller", t:"Mit Kinderwagen",   d:"nur befestigte Wege ohne Stufen", i:"👶"},
-      {v:"kids",     t:"Mit kleinen Kindern", d:"kurz, flach, viel zu entdecken", i:"🧒"},
-      {v:"dog",      t:"Mit Hund",          d:"schattig und mit Wasserzugang",   i:"🐕"},
-      {v:"adults",   t:"Erwachsene",        d:"keine Einschränkung",             i:"🧑"},
-      {v:"fit",      t:"Sportlich unterwegs", d:"Steigung ist ausdrücklich erwünscht", i:"🏃"}
-    ]
-  },
-  {
-    key:"slope", q:"Wie viel Steigung ist okay?",
-    hint:"Am Blindsee sind kurze steile Rampen üblich — hier legst du fest, wie viel davon du willst.",
-    multi:false,
-    options:[
-      {v:"flat", t:"Möglichst flach",      d:"kaum Höhenmeter, gleichmäßig",   i:"➖"},
-      {v:"some", t:"Etwas bergauf ist fein", d:"moderate Anstiege sind okay",  i:"📈"},
-      {v:"any",  t:"Egal, Hauptsache schön", d:"Höhenmeter spielen keine Rolle", i:"⛰"}
-    ]
-  },
-  {
-    key:"want", q:"Worauf habt ihr Lust?",
-    hint:"Mehrfachauswahl möglich. Danach wird gewichtet, welche Runde am besten passt.",
-    multi:true,
-    options:[
-      {v:"water", t:"Ans Wasser",          d:"möglichst viel direkt am Ufer",   i:"🏖"},
-      {v:"view",  t:"Aussicht & Fotos",    d:"Panoramablicke, Höhenpunkte",     i:"📷"},
-      {v:"shade", t:"Schatten & Wald",     d:"kühl auch bei Sonne",             i:"🌲"},
-      {v:"spots", t:"Viel sehen",          d:"möglichst viele markierte Orte",  i:"🧭"},
-      {v:"quiet", t:"Ruhe",                d:"abseits von Parkplatz und Straße", i:"🤫"}
-    ]
-  }
-];
-
-let wizStep = 0;
-let QS = QUESTIONS;
-const answers = {size:null, who:null, slope:null, want:[]};
-
-function openWizard(){
-  // Mit Kinderwagen stehen Begleitung und Steigungstoleranz bereits fest -
-  // zwei Fragen weniger statt vier Mal dasselbe zu beantworten.
-  if (kwMode){
-    answers.who = "stroller";
-    answers.slope = "flat";
-    QS = QUESTIONS.filter(q => q.key !== "who" && q.key !== "slope");
-  } else {
-    QS = QUESTIONS;
-  }
-  wizStep = 0;
-  document.getElementById("wizard").hidden = false;
-  drawWizard();
-}
-function closeWizard(){ document.getElementById("wizard").hidden = true; }
-
-function drawWizard(){
-  const q = QS[wizStep];
-  document.getElementById("wiz-no").textContent = `Schritt ${wizStep + 1} von ${QS.length}`;
-  document.getElementById("wiz-q").textContent = q.q;
-  document.getElementById("wiz-hint").textContent = q.hint;
-  document.getElementById("wiz-bar").style.width = ((wizStep + 1) / QS.length * 100) + "%";
-  document.getElementById("wiz-back").style.visibility = wizStep === 0 ? "hidden" : "visible";
-  document.getElementById("wiz-next").textContent =
-    wizStep === QS.length - 1 ? "Runde vorschlagen" : "Weiter";
-
-  const cur = answers[q.key];
-  document.getElementById("wiz-body").innerHTML = q.options.map(o => {
-    const on = q.multi ? (cur || []).includes(o.v) : cur === o.v;
-    return `<button class="opt ${on ? "on" : ""}" data-v="${o.v}">
-      <span class="opt-ico">${o.i}</span>
-      <span class="opt-main"><span class="opt-t">${o.t}</span><span class="opt-d">${o.d}</span></span>
-      <span class="opt-check"></span></button>`;
-  }).join("");
-
-  document.getElementById("wiz-body").querySelectorAll(".opt").forEach(b =>
-    b.addEventListener("click", () => {
-      const v = b.dataset.v;
-      if (q.multi){
-        const arr = answers[q.key] || [];
-        answers[q.key] = arr.includes(v) ? arr.filter(x => x !== v) : arr.concat(v);
-      } else {
-        answers[q.key] = v;
-      }
-      drawWizard();
-      updateNext();
-    }));
-  updateNext();
-}
-
-function updateNext(){
-  const q = QS[wizStep];
-  const cur = answers[q.key];
-  const ok = q.multi ? true : !!cur;
-  document.getElementById("wiz-next").disabled = !ok;
-}
-
-document.getElementById("wiz-next").addEventListener("click", () => {
-  if (wizStep < QS.length - 1){ wizStep++; drawWizard(); }
-  else { closeWizard(); applyWizard(); }
-});
-document.getElementById("wiz-back").addEventListener("click", () => {
-  if (wizStep > 0){ wizStep--; drawWizard(); }
-});
-document.getElementById("wiz-close").addEventListener("click", closeWizard);
-document.getElementById("open-wizard").addEventListener("click", openWizard);
-
-/* --------- Bewertung: harte Anforderungen, dann gewichtete Wünsche --------- */
-const BAND_ORDER = ["mini", "kurz", "see", "gross", "pano"];
-
-function scoreRoutes(){
-  const want = answers.want || [];
-  const wantedIdx = BAND_ORDER.indexOf(answers.size);
-  const results = [];
-
-  for (const r of ROUTES){
-    const reasons = [], blockers = [];
-
-    // Harte Anforderungen
-    if (answers.who === "stroller" && r.stroller_grade === "red")
-      blockers.push(r.steps_m > 0 ? "Treppen — Wagen muss getragen werden"
-                                  : "zu lange steile Abschnitte");
-    if (answers.who === "kids" && (r.km > 4.5 || r.steep_share > 0.14))
-      blockers.push("für kleine Kinder zu lang oder zu steil");
-    if (answers.who === "dog" && !r.dog_ok)
-      blockers.push("Treppen auf der Strecke");
-    if (answers.slope === "flat" && r.steep_share > 0.12)
-      blockers.push("zu viele steile Abschnitte");
-
-    let score = 0;
-
-    // Passung zur gewünschten Größe (Nachbarklassen zählen abgeschwächt)
-    const idx = BAND_ORDER.indexOf(r.id);
-    const gap = Math.abs(idx - wantedIdx);
-    score += gap === 0 ? 40 : gap === 1 ? 22 : gap === 2 ? 8 : 0;
-    if (gap === 0) reasons.push("entspricht genau der gewünschten Rundenlänge");
-    else if (gap === 1) reasons.push("etwas " + (idx > wantedIdx ? "länger" : "kürzer") + " als gewünscht");
-
-    // Steigung
-    if (answers.slope === "flat"){
-      score += Math.max(0, 18 - r.steep_share * 120);
-      if (r.steep_share < 0.05) reasons.push("durchgehend flach");
-    } else if (answers.slope === "some"){
-      score += r.ascent_m > 40 && r.ascent_m < 200 ? 14 : 6;
-    } else {
-      score += Math.min(18, r.ascent_m / 14);
-      if (r.ascent_m > 150) reasons.push(`${r.ascent_m} Höhenmeter`);
-    }
-
-    // Begleitung
-    if (answers.who === "stroller"){
-      if (r.stroller_grade === "green"){
-        score += 18; reasons.push("mit Kinderwagen problemlos: fester Belag, keine Stufen");
-      } else if (r.stroller_grade === "yellow"){
-        score += 8; reasons.push("mit geländegängigem Wagen machbar");
-      }
-      if (r.benches >= 2){
-        score += Math.min(10, r.benches * 2);
-        reasons.push(`${r.benches} Bänke zum Pausieren unterwegs`);
-      }
-      score += r.shade_share * 12;
-    }
-    if (answers.who === "kids"){
-      score += Math.max(0, 14 - r.km * 2);
-      if (r.hotspots.length >= 3) { score += 8; reasons.push("unterwegs gibt es viel zu entdecken"); }
-    }
-    if (answers.who === "dog"){
-      score += r.shade_share * 14 + r.lake_share * 10;
-      if (r.shade_share > .3) reasons.push("viel Schatten für den Hund");
-      if (r.lake_share > .4) reasons.push("Wasserzugang unterwegs");
-    }
-    if (answers.who === "fit") score += Math.min(14, r.ascent_m / 18);
-
-    // Wünsche
-    if (want.includes("water")){
-      score += r.lake_share * 26;
-      if (r.lake_share > .5) reasons.push(`${Math.round(r.lake_share*100)} % der Strecke direkt am Ufer`);
-    }
-    if (want.includes("shade")){
-      score += r.shade_share * 24;
-      if (r.shade_share > .3) reasons.push(`${Math.round(r.shade_share*100)} % durch Wald`);
-    }
-    if (want.includes("view")){
-      score += Math.min(22, (r.highpoint_m - r.lowpoint_m) / 4);
-      const views = r.hotspots.filter(id => (SPOT_BY_ID[id] || {}).category === "photo").length;
-      score += views * 6;
-      if (views) reasons.push(`${views} Aussichtspunkt${views > 1 ? "e" : ""} auf der Strecke`);
-    }
-    if (want.includes("spots")){
-      score += r.hotspots.length * 5;
-      if (r.hotspots.length >= 4) reasons.push(`${r.hotspots.length} markierte Orte unterwegs`);
-    }
-    if (want.includes("quiet")){
-      score += (1 - r.lake_share) * 8 + r.shade_share * 10;
-      if (r.shade_share > .4) reasons.push("ruhiger Waldweg abseits des Ufers");
-    }
-
-    results.push({route:r, score, reasons, blockers});
-  }
-
-  results.sort((a, b) =>
-    (a.blockers.length - b.blockers.length) || (b.score - a.score));
-  return results;
-}
-
-/* Pruefzugang fuer automatisierte Sichtpruefung: mit const/let deklarierte
-   Werte liegen nicht auf window und sind aus eingespeisten Skripten sonst
-   unerreichbar. Nur Lesezugriff auf bereits vorhandenen Zustand. */
-window.__app = {
-  get map(){ return map; },
-  get routes(){ return ROUTES; },
-  get activeRoute(){ return activeRoute; },
-  get activeBase(){ return activeBase; },
-  get custom(){ return custom; },
-  get filters(){ return filters; },
-  get kwMode(){ return kwMode; },
-  get variants(){ return VARIANTS; },
-  deriveRoute, scoreRoutes, shadeMask, routeGPX,
-};
-
-function applyWizard(){
-  const res = scoreRoutes();
-  const usable = res.filter(x => !x.blockers.length);
-  const list = (usable.length ? usable : res).map(x => x.route);
-  const reasons = {};
-  (usable.length ? usable : res).forEach((x, i) => {
-    if (i === 0){
-      reasons[x.route.id] = `<b>Beste Übereinstimmung.</b> ` +
-        (x.reasons.length ? x.reasons.join(" · ") : "passt zu deiner Auswahl") + ".";
-    } else if (i < 3 && x.reasons.length){
-      reasons[x.route.id] = x.reasons.slice(0, 2).join(" · ") + ".";
-    }
-    if (x.blockers.length){
-      reasons[x.route.id] = `<b style="color:var(--amber)">Mit Einschränkung:</b> ${x.blockers.join(", ")}.`;
-    }
-  });
-
-  showTab("routes");
-  activeRoute = list[0];
-  renderRoutes(list, reasons);
-  selectRoute(list[0], {fly:true});
-  setSheet("full");
-  document.getElementById("sheet-sub").textContent =
-    usable.length ? `${usable.length} von ${ROUTES.length} Runden passen zu deiner Auswahl`
-                  : "Keine Runde erfüllt alle Kriterien — hier die nächstbesten";
-}
-
+/* Tour-Assistent entfernt (2026-09-29): ein vierstufiger Fragebogen mit
+   375 Antwortkombinationen. Florians Vorgabe war, die Konfiguration
+   wegzulassen - es gibt die festen Runden, aus denen man eine waehlt. */
 /* ============================ Light / Dark Mode ============================ */
 let lightMode = false;
 try { lightMode = localStorage.getItem("blindsee-light") === "1"; } catch(e){}
