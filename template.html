@@ -301,7 +301,15 @@ body.light{--bg:#f5f7fa;--surface:#ffffff;--surface-2:#eef1f6;--line:#d0d5dd;
   --accent:#0969da;--accent-soft:rgba(9,105,218,.1);
   --green:#1a7f37;--amber:#9a6700;--red:#cf222e}
 body.light .maplibregl-ctrl-attrib{background:rgba(255,255,255,.7);color:#5a6270}
-body.light .topbar{background:linear-gradient(180deg,rgba(245,247,250,.92),rgba(245,247,250,0))}
+/* Die Kopfzeile liegt ueber dem Satellitenbild - und das ist in JEDEM Thema
+   dunkel. Deshalb behaelt sie auch im Light Mode den dunklen Verlauf und helle
+   Schrift. Vorher wurde der Text auf var(--text) umgestellt (#1a1d23) und die
+   zweite Zeile stand dunkel auf dunklem Bild, weil der helle Verlauf nach
+   unten transparent wird. Im Quelltext war das nicht zu sehen - beide Teile
+   sind fuer sich richtig. Gefunden am 2026-09-29 per Sichtpruefung im Browser. */
+body.light .topbar{background:linear-gradient(180deg,rgba(13,17,23,.92),rgba(13,17,23,0))}
+body.light .brand{color:#f0f3f8}
+body.light .brand small{color:rgba(240,243,248,.78)}
 body.light .g-top{background:linear-gradient(180deg,rgba(245,247,250,.85),transparent)}
 body.light .g-bottom{background:linear-gradient(0deg,rgba(245,247,250,.9),transparent)}
 body.light .icon-btn,body.light .g-chip,body.light .compass,body.light .t-bar{
